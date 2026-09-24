@@ -740,17 +740,35 @@ def _solve_with_2captcha_v2(api_key: str, challenge: CaptchaChallenge,
             #                    the two exits worth seeing in the log.
             voucher = solution.get("captcha_voucher")
             existing = solution.get("existing_token")
-            token = (solution.get("gRecaptchaResponse") or solution.get("token")
-                     or voucher or existing)
+            # For AWS WAF, existing_token FIRST. It is the value the site's
+            # own `aws-waf-token` cookie holds, while a captcha_voucher is
+            # an intermediate that the WAF's captcha.js exchanges for one,
+            # not a cookie value. Measured on binance.com 2026-09-24:
+            #   voucher set as the cookie        page stayed "Human Verification"
+            #   existing_token as the cookie on  "Support Center | Binance
+            #   .binance.com, same exit          Support", 500 KB, twice
+            # The sibling repo this client came from preferred the voucher;
+            # that was never measured to clear a page there either.
+            if challenge.is_aws_waf:
+                token = existing or voucher
+            else:
+                token = (solution.get("gRecaptchaResponse") or solution.get("token")
+                         or voucher or existing)
             if not token:
-                raise RuntimeError(f"task ready but no token in solution: {solution}")
+                raise RuntimeError("task ready but no token in solution "
+                                   "(keys: %s)" % sorted(solution))
             if challenge.is_aws_waf and not voucher and existing:
-                logger.warning(
-                    "AWS WAF: 2captcha returned existing_token, not "
-                    "captcha_voucher — its exit was not challenged, so "
-                    "nothing was actually solved. The token is the site's "
-                    "ordinary one; if the page stays blocked, the exit THIS "
-                    "run uses is the variable, not the solver.")
+                # Not an error. It means 2captcha's own exit loaded the page
+                # without being challenged and handed back the ordinary
+                # token. On binance.com that token was ACCEPTED from the
+                # challenged exit, so the log says what happened and does
+                # not predict failure.
+                logger.info(
+                    "AWS WAF: 2captcha returned existing_token without a "
+                    "captcha_voucher — its exit was not challenged, and the "
+                    "site's ordinary token is what comes back. If the page "
+                    "stays blocked with it, the exit THIS run uses is the "
+                    "variable, not the solver.")
             logger.info("2captcha solved %s in ~%ds.", challenge.kind, waited)
             return token
         # status == "processing"
