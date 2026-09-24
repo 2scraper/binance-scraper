@@ -1,4 +1,4 @@
-# bbb-scraper — core dependencies
+# binance-scraper — core dependencies
 #
 #   pip install -r requirements.txt
 #

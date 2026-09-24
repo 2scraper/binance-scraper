@@ -34,9 +34,14 @@ REPO = Path(__file__).resolve().parent.parent
 ENGINE_LIBS = ("playwright", "pyppeteer", "selenium", "webdriver_manager")
 
 CLIS = ["playwright_scraper.py", "puppeteer_scraper.py", "selenium_scraper.py",
-        "scraper_api_client.py", "fingerprint_client.py", "env_config.py"]
+        "scraper_api_client.py", "fingerprint_client.py", "env_config.py",
+        "diff_runs.py"]
 
-SAMPLE_FILES = ("sample_output.json", "sample_output.csv")
+# One real run per mode: three row classes, three samples.
+SAMPLE_FILES = ("sample_output.json", "sample_output.csv",
+                "sample_output_copytrading.json", "sample_output_copytrading.csv",
+                "sample_output_announcements.json",
+                "sample_output_announcements.csv")
 
 # Phrases that show up in hand-written or template sample data. The point of
 # committing a sample is that it came from a real run; a placeholder teaches
@@ -79,16 +84,207 @@ CREDENTIAL_ALLOWED = (
 
 # A 2captcha API key is a 32-character hex string.
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
-# Contexts in which a 32-hex string is plainly not a key. Site-specific
-# entries belong here only once a committed fixture actually carries one —
-# CLAUDE.md §16: a family-wide entry copied without checking is how dead
-# code spreads. Kept as a CONTEXT allowlist rather than by loosening the
-# pattern: a bare 32-hex string anywhere else still fails, which is the
-# point of the check.
+
+# ONE context, and the reason is worth more than the tuple.
+#
+# Binance names every announcement by a 32-hex `code`, and the row's `url`
+# is built from it: `/en/support/announcement/detail/{code}`, the site's own
+# canonical address (a slug link redirects there). That is a published page
+# address, and the sample output carries fifty of them.
+#
+# The fixtures do NOT need the exemption: `make_fixtures.py` replaces every
+# code with a non-hex placeholder, because the parser only needs a code to
+# exist, not its value. So the only 32-hex strings left in the working tree
+# are inside that exact URL, and a bare 32-hex anywhere else still fails,
+# including in the same file on another line.
+#
+# Two things that look like keys and are not caught, checked rather than
+# assumed: a P2P advertiser id is `s` + 32 hex, which the \b-bounded rule
+# does not match (no word boundary after the `s`); and an avatar URL's hex
+# file name, which the parser never writes.
+SITE_PUBLIC_IDS = (
+    re.compile(r"binance\.com/en/support/announcement/detail/[0-9a-f]{32}\b"),
+)
+
+def _without_site_ids(line):
+    """A line with this site's own published identifiers taken out.
+
+    Two passes, and the second is what makes this precise rather than broad.
+    The first removes the identifier in the CONTEXTS the site publishes it
+    in. The second removes those exact VALUES anywhere else on the same line
+    — because a row that has already shown a hex as the ad's public id in its
+    URL is not also carrying it as a separate secret, and in CSV that is
+    exactly what happens: the URL column and the `listing_uuid` column hold
+    the same string, one of them with no surrounding context at all.
+
+    Anything left is a 32-hex the line never justified, and it still fails.
+    """
+    known = set()
+    for pattern in SITE_PUBLIC_IDS:
+        for match in pattern.finditer(line):
+            known.update(HEX32.findall(match.group(0)))
+        line = pattern.sub("SITE-AD-ID", line)
+    for value in known:
+        line = line.replace(value, "SITE-AD-ID")
+    return line
+
+
+# Contexts in which a 32-hex string is plainly not a key.
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest",
                  "checksum")
 
+# Files the BARE-HEX rule is not applied to, and the reason it is not.
+#
+# These are verbatim site markup and verbatim run output. This site emits
+# 32-hex identifiers in at least five public contexts — the tail of an ad
+# URL, the `uuid` field, a photo filename, the `location_list.uuids` array,
+# and its own front-end keys — so a bare-hex rule over them produces
+# hundreds of findings that are all correct data. A check that cries wolf 221
+# times is a check somebody switches off, and then it protects nothing.
+#
+# What covers them instead is STRONGER, not weaker, because it looks for the
+# shape of a secret rather than the shape of a hex string:
+#
+#   * every rule below still applies here — a credentialled URL and a
+#     key-shaped field both fail in these files;
+#   * `make_fixtures.py` refuses to write a fixture whose scrub left an
+#     agent's name, a per-seller UUID or a key-shaped value in it;
+#   * `smoke_test.py` re-scans the whole committed fixture corpus for JWTs,
+#     access tokens, API keys, Sentry DSNs, session ids, emails and proxy
+#     credentials, and FAILS if the corpus it scanned was empty.
+# EMPTY, and that is the stricter arrangement rather than an omission.
+#
+# A sibling repo exempts its generated data files from the bare-hex rule
+# wholesale. This one does not need to: the only 32-hex strings it produces
+# are announcement addresses, and SITE_PUBLIC_IDS forgives exactly that
+# context and nothing else, in every file.
+GENERATED_DATA_FILES = ()
+
+# A secret sitting in a field named like one. This is what the bare-hex rule
+# was reaching for, said precisely, and it applies to EVERY tracked file
+# including the generated ones.
+#
+# `\\?"` on every quote, and that is not defensive punctuation — it closes a
+# hole this check had. `fixtures_generated.json` stores each fixture's markup
+# as a JSON STRING, so every quote inside it is escaped: the file contains
+# `\"apiKey\": \"…\"`, not `"apiKey": "…"`. The pattern with bare quotes
+# therefore matched ZERO times in the largest file in the repository — the
+# one holding 427 KB of captured page payload, which is precisely where a
+# front-end key would arrive.
+#
+# Verified by planting a real-shaped key in a fixture: before the fix the
+# scan reported "nothing credential-shaped" and passed; after it, the scan
+# names the file and the line. And note what would NOT have saved it: this
+# site's front-end keys are 32-char ALPHANUMERIC rather than hex, so the
+# bare-hex rule does not see them either.
+#
+# The same escaping applies to any JSON-embedded capture, which is how every
+# repo in this family stores its fixtures — so this belongs upstream.
+KEY_SHAPED_FIELD = re.compile(
+    r'\\?"(?:[a-zA-Z_-]*(?:api[_-]?key|apikey|secret|token|password|'
+    r'client[_-]?key|access[_-]?key|site[_-]?key))\\?"\s*[:=]\s*'
+    r'\\?"(?!REDACTED-|SCRUBBED[_-]|your_|\{|\*\*\*)'
+    r'[A-Za-z0-9_-]{16,}\\?"', re.I)
+
+# History findings that have been LOOKED AT and cleared, each with its
+# reason. This exists because the history scan is a pre-publication gate: a
+# later commit cannot reach what a published tag and a merged PR's refs
+# already hold, so the decision has to be made once, before the repo goes
+# public — and a decision that is not written down gets made again by the
+# next person, differently.
+#
+# An entry here is a claim that someone read the blob. Anything not listed
+# still fails.
+HISTORY_DECIDED = {
+    # EMPTY, and it should stay that way. This repository was created clean:
+    # every blob that has ever existed in it was written by the work that
+    # built it, the fixtures were scrubbed by `make_fixtures.py` before their
+    # first commit, and the raw captures live in an ignored `captures/`.
+    #
+    # An entry here is a claim that a human read the blob and decided it is
+    # not a leak. Anything not listed still fails.
+}
+
+# Raw captures that HAVE been committed at some point, each with the decision
+# taken about it. A blob in history cannot be removed by a later commit — a
+# merged PR's refs and any published tag keep it — so this is the record the
+# pre-publication step asks for: read it once, decide once, BEFORE the repo
+# goes public, because afterwards only a fresh repository removes it.
+CAPTURES_IN_HISTORY_DECIDED = {
+    # Empty, and checked rather than assumed: the history scan was run over
+    # every blob before this repo was made public.
+    #
+    # Worth knowing what a capture of THIS site carries, so the decision can
+    # be made quickly: API responses only, no page markup. P2P adverts hold
+    # advertisers' public nicknames and ids; copy-trading holds lead
+    # traders' public nicknames and avatar URLs; announcements hold 32-hex
+    # article codes. None of it is ours (no key, no cookie, no proxy
+    # credential), and none of it is a person's private data: these are the
+    # pseudonymous handles the site shows every visitor on the same tile.
+}
+
+# Suffixes the HISTORY scan walks. It reads blobs out of git, where a
+# binary is expensive to decode and useless to grep, so it stays narrow.
 SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+
+# The WORKING-TREE scan is the opposite: it reads whatever is TRACKED, at any
+# suffix, and that is not tidiness.
+#
+# A suffix allowlist is a scanner that cannot see the thing most likely to
+# leak. `--dump-html live_results` writes `live_results.page1` — no suffix
+# the list knew — and a merge committed two of them, 1.5 MB each, carrying 26
+# per-seller UUIDs, 12 copies of the site's Algolia key and its Sentry keys.
+# The check that exists to stop exactly that ran, passed, and never opened
+# them.
+#
+# So the rule inverted: scan every tracked file, skip only what cannot be
+# grepped.
+BINARY_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf",
+                   ".zip", ".gz", ".tar", ".whl", ".woff", ".woff2", ".ttf")
+
+# A raw page dump has no business being tracked at all — it is 1.5 MB of
+# someone else's session material, and scrubbing it is `make_fixtures.py`'s
+# job. Matched on SHAPE rather than on the two names that got through once.
+CAPTURE_SHAPES = (
+    re.compile(r"\.page\d+$"),
+    re.compile(r"_debug\.(?:html|png)$"),
+    re.compile(r"^live_results\."),
+    re.compile(r"^captures?/"),
+    # ANY .html or .png under a working directory, whatever that directory is
+    # called. The four rules above all key on a NAME someone chose — a
+    # `--dump-html` default, a debug suffix, one particular directory — and
+    # that is exactly how a 1.5 MB page dump nearly reached the first commit
+    # of this repository: it sat in `live/`, which no pattern here listed and
+    # `.gitignore` did not cover either, and `git add -A` staged it while
+    # this check reported nothing.
+    #
+    # A repo's own source has no business keeping rendered HTML or a
+    # screenshot in a run directory, so the shape is the directory kind
+    # rather than the filename. `.github/` and `tests/` are not run
+    # directories and are unaffected; a fixture belongs in
+    # fixtures_generated.json, which make_fixtures.py scrubs and verifies.
+    re.compile(r"^(?:live|out|output|runs?|results?|tmp|scratch|dumps?)/"
+               r".*\.(?:html|htm|png|jpe?g|mhtml)$"),
+    # And a bare .html anywhere at the repo ROOT, which is where a
+    # `--dump-html foo.html` lands by default.
+    re.compile(r"^[^/]+\.(?:html|mhtml)$"),
+)
+
+
+def _git_files(*flags):
+    out = subprocess.run(["git", "ls-files", "-z", *flags], cwd=REPO,
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        return
+    for rel in out.stdout.split("\0"):
+        if rel:
+            yield REPO / rel
+
+
+def tracked_files():
+    """Only what git already tracks. Used by the raw-capture rule, whose
+    question is literally "is this committed"."""
+    return _git_files("--cached")
 
 
 # A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
@@ -127,11 +323,24 @@ def _is_in_virtualenv(path):
 
 
 def scanned_files():
-    for path in sorted(REPO.rglob("*")):
-        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
-            continue
-        if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+    """What the CONTENT rules read: tracked files PLUS new files that are not
+    ignored.
+
+    Asked of GIT rather than of the disk, and the two flags are the whole
+    design:
+
+      --cached            what is committed, which is what can leak;
+      --others            what is new, so a secret is caught BEFORE it is
+                          added rather than after;
+      --exclude-standard  which drops everything `.gitignore` covers — a
+                          developer's own `.env`, their captures and their
+                          run output are EXPECTED beside the scripts, and a
+                          check that went red on them would be red on every
+                          machine that had ever run the scraper for real,
+                          which is the machine most likely to run it.
+    """
+    for path in _git_files("--cached", "--others", "--exclude-standard"):
+        if not path.is_file() or path.suffix.lower() in BINARY_SUFFIXES:
             continue
         if _is_in_virtualenv(path):
             continue
@@ -161,6 +370,14 @@ def help_check():
 
 
 def sample_check():
+    """Each committed sample is a real run's output, and a schema test.
+
+    Three modes, three row classes, so three samples. Each file's rows are
+    checked against the row class of the mode THEY say they are, in column
+    order, and each CSV's header against the same class. Rename a field in
+    the code and forget the sample, and this fails rather than the docs
+    going stale.
+    """
     failed = []
     for name in SAMPLE_FILES:
         if not (REPO / name).is_file():
@@ -168,38 +385,40 @@ def sample_check():
     if failed:
         return failed
 
-    rows = json.loads((REPO / "sample_output.json").read_text(encoding="utf-8"))
-    if not rows:
-        return ["sample_output.json is empty — a run that found nothing is not a sample"]
-
-    blob = json.dumps(rows).lower()
-    hits = [m for m in FABRICATION_MARKERS if m in blob]
-    if hits:
-        failed.append(f"sample_output.json looks fabricated: {hits}")
-
-    # The committed sample doubles as a schema test: rename a field in the code
-    # and forget the sample, and this fails rather than the docs going stale.
     sys.path.insert(0, str(REPO))
-    from dataclasses import asdict
+    from dataclasses import fields
+    from output_writer import ROW_CLASS_BY_MODE
 
-    from output_writer import Business
-    expected = list(asdict(Business()).keys())
-
-    for i, row in enumerate(rows):
-        if list(row.keys()) != expected:
-            failed.append(f"sample_output.json row {i}: columns differ from "
-                          f"output_writer.Business")
-            break
-
-    with (REPO / "sample_output.csv").open(newline="", encoding="utf-8") as handle:
-        header = next(csv.reader(handle))
-    if header != expected:
-        failed.append("sample_output.csv header differs from output_writer.Business")
-
-    if not failed:
-        discounted = sum(1 for r in rows if r.get("original_price"))
-        print(f"ok       {len(rows)} rows, {len(expected)} columns, "
-              f"{discounted} discounted, schema matches")
+    for json_name in [n for n in SAMPLE_FILES if n.endswith(".json")]:
+        rows = json.loads((REPO / json_name).read_text(encoding="utf-8"))
+        if not rows:
+            failed.append(f"{json_name} is empty — a run that found nothing is not a sample")
+            continue
+        blob = json.dumps(rows).lower()
+        hits = [m for m in FABRICATION_MARKERS if m in blob]
+        if hits:
+            failed.append(f"{json_name} looks fabricated: {hits}")
+        modes = {r.get("mode") for r in rows}
+        if len(modes) != 1 or next(iter(modes)) not in ROW_CLASS_BY_MODE:
+            failed.append(f"{json_name}: rows name modes {sorted(map(str, modes))}, "
+                          f"expected exactly one of {sorted(ROW_CLASS_BY_MODE)}")
+            continue
+        mode = modes.pop()
+        expected = [f.name for f in fields(ROW_CLASS_BY_MODE[mode])]
+        for i, row in enumerate(rows):
+            if list(row.keys()) != expected:
+                failed.append(f"{json_name} row {i}: columns differ from "
+                              f"output_writer.{ROW_CLASS_BY_MODE[mode].__name__}")
+                break
+        csv_name = json_name[:-5] + ".csv"
+        with (REPO / csv_name).open(newline="", encoding="utf-8") as handle:
+            header = next(csv.reader(handle))
+        if header != expected:
+            failed.append(f"{csv_name} header differs from "
+                          f"output_writer.{ROW_CLASS_BY_MODE[mode].__name__}")
+        if not failed:
+            print(f"ok       {json_name}: {len(rows)} {mode} rows, "
+                  f"{len(expected)} columns, schema matches")
     return failed
 
 
@@ -217,14 +436,45 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} looks like a URL with real "
                               f"credentials in it")
 
-            for match in HEX32.findall(line):
+            # Applies everywhere, generated data included — this is the rule
+            # the bare-hex one was reaching for, said precisely.
+            for hit in KEY_SHAPED_FIELD.findall(line):
+                failed.append(f"{rel}:{lineno} has a secret-shaped value in a "
+                              f"key-shaped field")
+
+            if rel.name in GENERATED_DATA_FILES:
+                continue
+
+            for match in HEX32.findall(_without_site_ids(line)):
                 if any(token in line.lower() for token in HEX32_ALLOWED):
+                    continue
+                # A value already decided for the history scan is decided
+                # here too — and this branch is not hypothetical: writing
+                # HISTORY_DECIDED down put one of those strings into the
+                # working tree, so without it this check failed on the very
+                # file that records the decision.
+                if match in HISTORY_DECIDED:
                     continue
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+    # A raw capture must not be tracked AT ALL, whatever is in it. This is
+    # separate from the content scan on purpose: the two dumps that got
+    # through carried nothing of OURS -- no key, no proxy password, no
+    # cookie -- so a content rule would have passed them. What was wrong was
+    # that they were committed: 3 MB of someone else's session material,
+    # unscrubbed, in a repository whose own rules say captures stay out.
+    for path in tracked_files():
+        rel = path.relative_to(REPO).as_posix()
+        if any(shape.search(rel) for shape in CAPTURE_SHAPES):
+            failed.append(f"{rel} is a raw page capture and is TRACKED. "
+                          f"Captures stay out of the repo; run them through "
+                          f"make_fixtures.py, which scrubs them and proves "
+                          f"the trim parses identically.")
+
     if not failed:
-        print(f"ok       {scanned} files scanned, nothing credential-shaped")
+        print(f"ok       {scanned} files scanned, nothing credential-shaped, "
+              f"no raw capture tracked")
     return failed
 
 
@@ -261,7 +511,30 @@ def history_check():
         if parts:
             objects.append((parts[0], parts[1] if len(parts) > 1 else ""))
 
-    failed, scanned = [], 0
+    failed, decided, scanned = [], [], 0
+
+    # RAW CAPTURES THAT HAVE EVER BEEN COMMITTED, reported by name and size
+    # whether or not they are still in the tree. Removing one in a later
+    # commit does not reach the blob: a merged PR's refs and any published
+    # tag keep it, and only a fresh repository removes it. So this is not a
+    # pass/fail rule — it is the thing a reader has to make a decision about
+    # before the repo goes public, which is the whole reason this scan
+    # exists. A decision taken is recorded in CAPTURES_IN_HISTORY_DECIDED.
+    for sha, path in objects:
+        if not path or not any(s.search(path) for s in CAPTURE_SHAPES):
+            continue
+        size = subprocess.run(["git", "cat-file", "-s", sha], cwd=REPO,
+                              capture_output=True, text=True).stdout.strip()
+        note = CAPTURES_IN_HISTORY_DECIDED.get(path)
+        if note:
+            decided.append(f"{path} ({size} bytes, in history forever) — {note}")
+        else:
+            failed.append(
+                f"{path} ({size} bytes) is a raw page capture that has been "
+                f"COMMITTED at some point. A later commit cannot remove the "
+                f"blob. Read it, decide, and record the decision in "
+                f"CAPTURES_IN_HISTORY_DECIDED — or start a fresh repository.")
+
     for sha, path in objects:
         if not (path.endswith(SCANNED_SUFFIXES) or path in ("Dockerfile",)):
             continue
@@ -278,11 +551,17 @@ def history_check():
                     token in line for token in CREDENTIAL_ALLOWED):
                 failed.append(f"{path}:{lineno} (in a past commit) looks like "
                               f"a URL with real credentials in it")
-            for match in HEX32.findall(line):
+            for match in HEX32.findall(_without_site_ids(line)):
                 if any(token in line.lower() for token in HEX32_ALLOWED):
+                    continue
+                if match in HISTORY_DECIDED:
+                    decided.append(f"{path}:{lineno} {match[:6]}… — "
+                                   f"{HISTORY_DECIDED[match]}")
                     continue
                 failed.append(f"{path}:{lineno} (in a past commit) contains "
                               f"{match[:6]}… — the shape of a 2captcha key")
+    for note in sorted(set(decided)):
+        print(f"decided  {note}")
 
     if not failed:
         print(f"ok       {scanned} blob(s) across {len(objects)} object(s) "

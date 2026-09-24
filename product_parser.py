@@ -345,10 +345,16 @@ def check_pay_types(wanted: Sequence[str], offered: Optional[Sequence[str]]
     bad = [w for w in wanted if w not in offered]
     if not bad:
         return None
+    def norm(x: str) -> str:
+        # "SEPA Instant" (the name the page shows) against "SEPAinstant"
+        # (the identifier the API filters on): only spacing and case differ.
+        return re.sub(r"[^a-z0-9]", "", x.lower())
+
     hints = []
     for b in bad:
-        near = [o for o in offered if o.lower() == b.lower()
-                or b.lower() in o.lower() or o.lower() in b.lower()]
+        exact = [o for o in offered if norm(o) == norm(b)]
+        near = exact or [o for o in offered
+                         if norm(b) in norm(o) or norm(o) in norm(b)]
         if near:
             hints.append("%s -> %s" % (b, ", ".join(near[:4])))
     msg = ("--pay-type %s is not a payment method P2P offers for this fiat. "
@@ -484,8 +490,8 @@ def detect_page_state(text: Optional[str], status: Optional[int] = None,
                     markers on the page
         throttled   429, or 418 (the site's own "you kept going after
                     429" answer)
-        restricted  451. The site refuses the exit's COUNTRY. Binance's
-                    public API gives that answer to US addresses.
+        restricted  451, the status's own meaning: the exit's COUNTRY is
+                    refused. Not observed on this site (page_flow).
         blocked     403, or any other refusal with no widget
         unknown     anything else: not JSON, not an interstitial
 
@@ -638,22 +644,17 @@ def lead_url(portfolio_id: Optional[str]) -> str:
             if portfolio_id else "")
 
 
-def _slug(title: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+def announcement_url(code: Optional[str]) -> str:
+    """The announcement's canonical address.
 
-
-def announcement_url(title: Optional[str], code: Optional[str]) -> str:
-    """The address the site links its own announcements by.
-
-    Measured in the site's own article bodies (30 articles, 2026-09-24):
-    every link to an announcement is `/en/support/announcement/{slug}-{code}`,
-    with the slug lower-cased from the title.
+    The site's own article bodies link announcements as
+    `/en/support/announcement/{slug}-{code}`, and opening one of those in a
+    real browser redirects to `/en/support/announcement/detail/{code}`
+    (measured on two articles, 2026-09-24, past the WAF's CAPTCHA). The
+    redirect target is what is written here, since it needs no slug built
+    from a title.
     """
-    if not code:
-        return ""
-    slug = _slug(title or "")
-    return "%s/en/support/announcement/%s%s" % (
-        BASE, (slug + "-") if slug else "", code)
+    return "%s/en/support/announcement/detail/%s" % (BASE, code) if code else ""
 
 
 def parse_p2p_ad(rec: Dict[str, Any], query: Query, *, page: int,
@@ -744,7 +745,7 @@ def parse_announcement(rec: Dict[str, Any], catalog: Dict[str, Any], *,
     if aid is None or not title:
         return None
     return Announcement(
-        url=announcement_url(title, _str(rec.get("code"))),
+        url=announcement_url(_str(rec.get("code"))),
         sku=str(aid),
         title=title,
         catalog_id=_int(catalog.get("catalogId")),

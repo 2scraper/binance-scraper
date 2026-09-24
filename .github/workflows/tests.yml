@@ -1,6 +1,6 @@
 name: tests
 
-# Runs the offline suite only. Nothing here touches bbb.org, 2captcha.com
+# Runs the offline suite only. Nothing here touches binance.com, 2captcha.com
 # or any credential — GitHub Actions has no key, and a CI job that hits a live
 # site fails for reasons that have nothing to do with the commit.
 on:
@@ -54,77 +54,17 @@ jobs:
         # test suite but breaks the first thing any user types. The engine
         # libraries are deliberately NOT installed here, so an ImportError
         # naming one of them is expected; anything else is a failure.
-        run: |
-          python - <<'EOF'
-          import subprocess, sys
-
-          ENGINE_LIBS = ("playwright", "pyppeteer", "selenium", "webdriver_manager")
-          failed = []
-
-          for script in ["playwright_scraper.py", "puppeteer_scraper.py",
-                         "selenium_scraper.py", "scraper_api_client.py",
-                         "fingerprint_client.py", "env_config.py",
-                         "diff_runs.py"]:
-              r = subprocess.run([sys.executable, script, "--help"],
-                                 capture_output=True, text=True)
-              if r.returncode == 0:
-                  print(f"ok       {script}")
-                  continue
-              blob = r.stdout + r.stderr
-              if "ModuleNotFoundError" in blob and any(l in blob for l in ENGINE_LIBS):
-                  print(f"skipped  {script} (engine library not installed here)")
-                  continue
-              print(f"FAILED   {script}\n{blob}")
-              failed.append(script)
-
-          sys.exit(1 if failed else 0)
-          EOF
+        run: python3 .github/ci_checks.py --help-check
 
       - name: Committed sample output is real
-        # The README links to these two files, so a push without them ships
-        # broken links. And a sample invented by hand drifts from the schema and
-        # teaches readers the wrong field names, so these are cut from a real
-        # run rather than written by hand.
-        run: |
-          python - <<'EOF'
-          import csv, json, sys
-          from pathlib import Path
-
-          MARKERS = ("sample-product-", "example brand", "sample product",
-                     "product description text", "lorem ipsum")
-
-          fail = []
-          for name in ("sample_output.json", "sample_output.csv"):
-              if not Path(name).is_file():
-                  fail.append(f"{name} is missing — regenerate it from a real run")
-
-          if not fail:
-              rows = json.loads(Path("sample_output.json").read_text())
-              if not rows:
-                  fail.append("sample_output.json is empty")
-              blob = json.dumps(rows).lower()
-              hit = [m for m in MARKERS if m in blob]
-              if hit:
-                  fail.append(f"sample_output.json looks fabricated: {hit}")
-
-              # Column set must match what the writers actually produce.
-              from output_writer import Business
-              from dataclasses import asdict
-              expected = list(asdict(Business()).keys())
-              for i, row in enumerate(rows):
-                  if list(row.keys()) != expected:
-                      fail.append(f"row {i} columns drifted from output_writer.Business")
-                      break
-
-              with open("sample_output.csv", newline="", encoding="utf-8") as f:
-                  header = next(csv.reader(f))
-              if header != expected:
-                  fail.append("sample_output.csv header drifted from output_writer.Business")
-
-          for line in fail:
-              print("FAILED:", line)
-          sys.exit(1 if fail else 0)
-          EOF
+        # One implementation, in ci_checks.py, and not an inline copy. The
+        # inline copy this repo inherited imported the donor repo's row class
+        # by name (`from output_writer import Business`), which passes on
+        # every machine that never runs this workflow and failed on the first
+        # push. ci_checks.py checks each of the three per-mode samples against
+        # the row class of the mode its rows name. smoke_test.py asserts this
+        # workflow never imports output_writer inline again.
+        run: python3 .github/ci_checks.py --sample-check
 
       - name: Config reporter runs with no .env present
         run: python env_config.py
@@ -150,12 +90,6 @@ jobs:
         # directions: it passes on the repo and it flags a planted CDP
         # endpoint, a planted 32-hex key and a planted http proxy URL.
         run: python3 .github/ci_checks.py --secret-check
-
-      - name: The repo's own --help and sample checks agree with this workflow
-        # ci_checks.py implements all three checks. The two above are also
-        # done as workflow steps for the clearer failure output; running them
-        # here as well is what keeps the two from drifting apart again.
-        run: python3 .github/ci_checks.py --help-check --sample-check
 
   engine-smoke:
     # The offline job above installs NO engine library on purpose (that is what
@@ -207,14 +141,20 @@ jobs:
         run: .venv/bin/pip check
 
       - name: Offline suite, with ${{ matrix.engine }} actually importable
-        # The suite names each engine it could not import. In this job that
-        # engine IS installed, so naming it means a real import error rather
+        # The suite prints "SKIP <engine>_scraper — engine library absent" for
+        # each engine it could not import. In this job that engine IS
+        # installed, so a skip naming it means a real import error rather
         # than an expected absence — the other two engines are absent here by
         # design and their skips are fine.
+        #
+        # The pattern is the suite's OWN wording. The copy this repo inherited
+        # grepped for "could not be imported", a phrase the suite never
+        # prints, so this step could not fail. Checked against a real log of
+        # the suite run without the engine, where it DOES match.
         run: |
           set -o pipefail
           .venv/bin/python smoke_test.py | tee smoke.log
-          if grep -q "${{ matrix.engine }}_scraper could not be imported" smoke.log; then
+          if grep -q "SKIP ${{ matrix.engine }}_scraper " smoke.log; then
             echo "FAILED: ${{ matrix.engine }}_scraper failed to import even though"
             echo "        ${{ matrix.engine }} is installed in this job."
             exit 1
@@ -241,18 +181,18 @@ jobs:
       - name: Build the image
         # Plain `docker build`, no registry and no push: the point is that the
         # Dockerfile still builds, not that anything is published.
-        run: docker build -t bbb-scraper:ci .
+        run: docker build -t binance-scraper:ci .
 
       - name: The entrypoint runs inside the image
         # Its CMD is --help, so a bare `run` exercises the default path. This
         # is the invocation the broken image failed on.
-        run: docker run --rm bbb-scraper:ci
+        run: docker run --rm binance-scraper:ci
 
       - name: Chromium is actually installed in the image
         # `playwright install` is the step this job exists to prove, so check
         # the browser is there rather than trusting that the layer succeeded.
         run: |
-          docker run --rm --entrypoint python3 bbb-scraper:ci -c "
+          docker run --rm --entrypoint python3 binance-scraper:ci -c "
           from playwright.sync_api import sync_playwright
           with sync_playwright() as p:
               b = p.chromium.launch()
@@ -267,7 +207,7 @@ jobs:
           set -e
           missing=0
           for f in .env smoke_test.py tests sample_output.json; do
-            if docker run --rm --entrypoint sh bbb-scraper:ci -c "test -e /app/$f"; then
+            if docker run --rm --entrypoint sh binance-scraper:ci -c "test -e /app/$f"; then
               echo "::error::$f is inside the image and should not be"
               missing=1
             fi

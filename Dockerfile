@@ -2,10 +2,10 @@
 # container with its own Chromium — for a CI canary run or a scheduled job,
 # not required for local development (`pip install` directly is simpler there).
 #
-#   docker build -t bbb-scraper .
-#   docker run --rm -v "$PWD/out:/out" bbb-scraper \
-#     --url "https://www.bbb.org/us/category/restaurants" \
-#     --pages 3 --out /out/restaurants
+#   docker build -t binance-scraper .
+#   docker run --rm -v "$PWD/out:/out" binance-scraper \
+#     --mode copytrading \
+#     --pages 3 --out /out/leads
 #
 # Pass --proxy/--twocaptcha-key the same way as running locally, or mount a
 # .env at /app/.env — nothing here bakes in a credential.
