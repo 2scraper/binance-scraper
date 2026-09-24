@@ -449,6 +449,10 @@ def check_state_policy():
           "COUNTRY" in F.refusal_advice("restricted"))
     check("...and claims nothing about what binance.com has been SEEN doing",
           "answers" not in F.refusal_advice("restricted"))
+    check("a CDP 401 is explained as expired credentials, not a held pid",
+          "expired" in F.cdp_connect_hint("WebSocket error: 401 Unauthorized")
+          and "pid" not in F.cdp_connect_hint("401 Unauthorized"))
+    check("...and a 500 as a held pid", "pid" in F.cdp_connect_hint("HTTP 500"))
     equal("the aws-waf-token goes on the REGISTRABLE domain",
           (F.cookie_domain("www.binance.com"), F.cookie_domain("p2p.binance.com")),
           (".binance.com", ".binance.com"))

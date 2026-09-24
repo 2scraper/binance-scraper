@@ -753,3 +753,23 @@ def worker_pool(pool, worker_index: int):
     proxies = pool.proxies
     offset = worker_index % len(proxies)
     return ProxyPool(proxies[offset:] + proxies[:offset], rotate="per-run")
+
+
+def cdp_connect_hint(error_text: str) -> str:
+    """What a failed --cdp-endpoint connection means, from its status.
+
+    Two answers that want opposite fixes. Measured 2026-09-24 against four
+    Scraping Browser endpoints left in sibling repos' .env files: all four
+    answered 401 Unauthorized, because a profile's credentials last about a
+    day. The message used to explain a 500 (a pid another run still holds)
+    whatever the status was, which sent the reader to wait for a run that
+    did not exist.
+    """
+    if "401" in (error_text or ""):
+        return ("HTTP 401: the endpoint's credentials were refused. A Scraping "
+                "Browser profile's credentials last about a day, so an "
+                "endpoint copied from an older .env has usually expired. "
+                "Get a fresh one from your 2Captcha dashboard.")
+    return ("A Scraping Browser profile allows ONE live connection at a time, "
+            "so an HTTP 500 here usually means another run still holds this "
+            "`pid`. Wait for it to finish, or use a different pid.")

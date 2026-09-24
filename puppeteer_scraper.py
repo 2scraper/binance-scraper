@@ -234,13 +234,10 @@ class _Ops:
                 # Re-raised masked, with the meaning spelled out, so
                 # __main__ can map it onto exit 5.
                 raise RuntimeError(
-                    "could not connect to --cdp-endpoint %s: %s\n"
-                    "A Scraping Browser profile allows ONE live connection at "
-                    "a time, so an HTTP 500 here usually means another run "
-                    "still holds this `pid`. Wait for it to finish, or use a "
-                    "different pid."
+                    "could not connect to --cdp-endpoint %s: %s\n%s"
                     % (_mask_credentials(self.args.cdp_endpoint),
-                       _mask_credentials(str(e)))) from None
+                       _mask_credentials(str(e)),
+                       page_flow.cdp_connect_hint(str(e)))) from None
             self.page = self.bridge.run(self.browser.newPage())
             return self
 

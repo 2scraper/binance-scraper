@@ -303,9 +303,7 @@ def _connect_remote(pw, args):
             f"could not connect to --cdp-endpoint "
             f"{_mask_credentials(args.cdp_endpoint)}: "
             f"{_mask_credentials(str(e))}\n"
-            f"A Scraping Browser profile allows ONE live connection at a "
-            f"time, so a 500 here usually means another run still holds this "
-            f"`pid`. Wait for it to finish, or use a different pid."
+            f"{page_flow.cdp_connect_hint(str(e))}"
         ) from None
     context = browser.contexts[0] if browser.contexts else browser.new_context()
     page = context.new_page()

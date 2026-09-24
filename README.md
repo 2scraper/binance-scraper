@@ -191,7 +191,10 @@ One key, four separately-billed products ([2captcha.com](https://2captcha.com)):
   some jurisdictions, the United States among them.
 * **The Scraping Browser API** (`--cdp-endpoint`): a remote browser you do
   not run, with a chosen exit country. One live connection per `pid`, so
-  `--concurrency` is refused with it.
+  `--concurrency` is refused with it. **Not yet run live against Binance**:
+  the four endpoints available when this was written had expired (HTTP 401
+  on 2026-09-24; a profile's credentials last about a day). The engines
+  report that as exit 5 and say so.
 * **Fingerprints** (`--fingerprint`): a consistent device identity for a
   local browser. Ignored with `--cdp-endpoint`, which brings its own.
 
