@@ -293,9 +293,23 @@ def _connect_remote(pw, args):
     """Attach to an already-running browser over CDP; return (browser, context, page)."""
     logger.info("Connecting to existing browser over CDP: %s",
                 _mask_credentials(args.cdp_endpoint))
-    try:
-        browser = pw.chromium.connect_over_cdp(args.cdp_endpoint, timeout=30000)
-    except (PWError, PWTimeout) as e:
+    browser, e = None, None
+    for attempt in range(1, page_flow.CDP_CONNECT_ATTEMPTS + 1):
+        try:
+            browser = pw.chromium.connect_over_cdp(args.cdp_endpoint, timeout=30000)
+            break
+        except (PWError, PWTimeout) as err:
+            e = err
+            if attempt < page_flow.CDP_CONNECT_ATTEMPTS and page_flow.cdp_should_retry(str(err)):
+                logger.warning("The Scraping Browser profile is still locked "
+                               "(attempt %d/%d) — a previous run may be "
+                               "releasing it; retrying in %.0fs.", attempt,
+                               page_flow.CDP_CONNECT_ATTEMPTS,
+                               page_flow.CDP_LOCKED_WAIT_S)
+                time.sleep(page_flow.CDP_LOCKED_WAIT_S)
+                continue
+            break
+    if browser is None:
         # The endpoint carries a password, and Playwright repeats it five
         # times in its error text (§8). Rewritten with it masked, keeping
         # host and port, which are the useful half.

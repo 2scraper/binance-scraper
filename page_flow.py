@@ -773,3 +773,30 @@ def cdp_connect_hint(error_text: str) -> str:
     return ("A Scraping Browser profile allows ONE live connection at a time, "
             "so an HTTP 500 here usually means another run still holds this "
             "`pid`. Wait for it to finish, or use a different pid.")
+
+
+# Connecting to a Scraping Browser profile right after the previous run let
+# go of it answers HTTP 500 `profile_locked`: the service releases a profile
+# 1.6-1.9 s after a clean disconnect (measured 3 of 3, 2026-09-24). Two
+# back-to-back runs therefore failed with exit 5 in the first live matrix
+# through --cdp-endpoint. Three attempts 3 s apart ride that out, and a
+# profile genuinely held by another run still fails, after ~9 s, with the
+# pid explanation.
+CDP_CONNECT_ATTEMPTS = 3
+CDP_LOCKED_WAIT_S = 3.0
+# pyppeteer does not surface the 500 at all: its connect() waits on a future
+# the rejected handshake never resolves, so only a timeout ends it. A
+# successful connect measured 0.8-0.95 s, so 10 s is an order of magnitude
+# of headroom and a third of the 30 s it used to wait per attempt.
+CDP_CONNECT_TIMEOUT_S = 10
+
+
+def cdp_should_retry(error_text: str) -> bool:
+    """Whether a failed --cdp-endpoint connection is worth another attempt:
+    a locked profile (500) or a connect that never answered. A 401 is not:
+    expired credentials stay expired."""
+    text = error_text or ""
+    if "401" in text:
+        return False
+    return ("profile_locked" in text or " 500" in text or "HTTP 500" in text
+            or "did not return within" in text)

@@ -191,10 +191,13 @@ One key, four separately-billed products ([2captcha.com](https://2captcha.com)):
   some jurisdictions, the United States among them.
 * **The Scraping Browser API** (`--cdp-endpoint`): a remote browser you do
   not run, with a chosen exit country. One live connection per `pid`, so
-  `--concurrency` is refused with it. **Not yet run live against Binance**:
-  the four endpoints available when this was written had expired (HTTP 401
-  on 2026-09-24; a profile's credentials last about a day). The engines
-  report that as exit 5 and say so.
+  `--concurrency` is refused with it. Run live on 2026-09-24 through a
+  `country-de` profile: Playwright and pyppeteer, all three modes, 8 of 8
+  runs complete, back to back. Two details measured on the way: a profile
+  stays locked for 1.6-1.9 s after a clean disconnect, so the engines retry
+  a `profile_locked` connection rather than failing on it; and an expired
+  profile answers HTTP 401, which the engines report as exit 5 naming the
+  expiry. Selenium refuses a credentialled endpoint with exit 2.
 * **Fingerprints** (`--fingerprint`): a consistent device identity for a
   local browser. Ignored with `--cdp-endpoint`, which brings its own.
 

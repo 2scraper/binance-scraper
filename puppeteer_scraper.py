@@ -144,6 +144,10 @@ class _AsyncBridge:
                 "Task was destroyed but it is pending",
                 "Future exception was never retrieved",
                 "No session with given id",
+                # A rejected --cdp-endpoint handshake, raised by websockets in
+                # a task pyppeteer never awaits, AFTER the connect has already
+                # timed out and been reported with the reason.
+                "server rejected WebSocket connection",
                 "Event loop is closed")):
             logger.debug("Ignoring teardown noise from pyppeteer: %s", message)
             return
@@ -224,11 +228,30 @@ class _Ops:
         if self.remote:
             logger.info("Connecting to an existing browser over CDP: %s",
                         _mask_credentials(self.args.cdp_endpoint))
-            try:
-                self.browser = self.bridge.run(
-                    connect(browserWSEndpoint=self.args.cdp_endpoint,
-                            ignoreHTTPSErrors=True), timeout=CONNECT_TIMEOUT)
-            except Exception as e:  # noqa: BLE001
+            err = None
+            for attempt in range(1, page_flow.CDP_CONNECT_ATTEMPTS + 1):
+                try:
+                    self.browser = self.bridge.run(
+                        connect(browserWSEndpoint=self.args.cdp_endpoint,
+                                ignoreHTTPSErrors=True),
+                        timeout=page_flow.CDP_CONNECT_TIMEOUT_S)
+                    err = None
+                    break
+                except Exception as e:  # noqa: BLE001 — see below
+                    err = e
+                    if (attempt < page_flow.CDP_CONNECT_ATTEMPTS
+                            and page_flow.cdp_should_retry(str(e))):
+                        logger.warning("The Scraping Browser profile did not "
+                                       "accept the connection (attempt %d/%d) "
+                                       "— it may still be locked by a previous "
+                                       "run; retrying in %.0fs.", attempt,
+                                       page_flow.CDP_CONNECT_ATTEMPTS,
+                                       page_flow.CDP_LOCKED_WAIT_S)
+                        time.sleep(page_flow.CDP_LOCKED_WAIT_S)
+                        continue
+                    break
+            if err is not None:
+                e = err
                 # websockets' message ("server rejected WebSocket connection:
                 # HTTP 500") names neither the endpoint nor the reason.
                 # Re-raised masked, with the meaning spelled out, so
@@ -239,6 +262,7 @@ class _Ops:
                        _mask_credentials(str(e)),
                        page_flow.cdp_connect_hint(str(e)))) from None
             self.page = self.bridge.run(self.browser.newPage())
+            self._enable_autosolve()
             return self
 
         launch_args = ["--no-sandbox", "--disable-dev-shm-usage",
@@ -272,6 +296,29 @@ class _Ops:
             self.bridge.run(self.page.authenticate(
                 {"username": credentials[0], "password": credentials[1]}))
         return self
+
+    def _enable_autosolve(self):
+        """The Scraping Browser API's own CAPTCHA domain, as the Playwright
+        engine enables it: if the WAF ever puts its CAPTCHA in front of the
+        landing, the extension can clear it before the local solver gets a
+        turn. Absent from this engine until the first live run over
+        --cdp-endpoint showed the difference."""
+        async def _enable():
+            # One coroutine for both calls: pyppeteer's CDPSession.send
+            # returns a Future rather than a coroutine, and the bridge's
+            # run_coroutine_threadsafe accepts only the latter ("A coroutine
+            # object is required" on the first live run).
+            session = await self.page.target.createCDPSession()
+            await session.send("Captcha.setAutoSolve",
+                               {"autoSolve": True, "options": [{"type": "*"}]})
+
+        try:
+            self.bridge.run(_enable(), timeout=30)
+            logger.info("Scraping Browser API Captcha.setAutoSolve enabled.")
+        except Exception as e:  # noqa: BLE001 — a non-Scraping-Browser endpoint
+            logger.info("Captcha.setAutoSolve not available on this "
+                        "--cdp-endpoint (%s) — relying on this script's own "
+                        "detect+solve logic instead.", e)
 
     def _apply_fingerprint(self):
         """The SAME init script the other two engines install, so no engine
