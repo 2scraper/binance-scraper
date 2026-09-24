@@ -453,9 +453,17 @@ def check_state_policy():
           "expired" in F.cdp_connect_hint("WebSocket error: 401 Unauthorized")
           and "pid" not in F.cdp_connect_hint("401 Unauthorized"))
     check("...and a 500 as a held pid", "pid" in F.cdp_connect_hint("HTTP 500"))
-    equal("the aws-waf-token goes on the REGISTRABLE domain",
-          (F.cookie_domain("www.binance.com"), F.cookie_domain("p2p.binance.com")),
+    waf = fx("waf_captcha_chromium")
+    check("the captured CAPTCHA page names its cookie domains (not vacuous)",
+          "awsWafCookieDomainList" in waf)
+    equal("the aws-waf-token goes on the domain the SITE lists",
+          (F.cookie_domain("www.binance.com", waf), F.cookie_domain("p2p.binance.com", waf)),
           (".binance.com", ".binance.com"))
+    equal("an EMPTY list means the page host (transfermarkt's, 2026-09-24)",
+          F.cookie_domain("www.transfermarkt.com", "awsWafCookieDomainList = [];"),
+          "www.transfermarkt.com")
+    equal("a host the list does not cover gets the host",
+          F.cookie_domain("www.example.org", waf), "www.example.org")
 
 
 def check_policy_constants_have_a_consumer():

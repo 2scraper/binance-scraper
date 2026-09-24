@@ -29,6 +29,7 @@ Nothing here imports a browser, and **no JavaScript crosses this boundary**
 """
 
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional, Tuple
 
@@ -321,15 +322,39 @@ def finish(args, query: Query, outcomes: List, stop_reason: str,
                "query": query_summary(query)})
 
 
-def cookie_domain(host: Optional[str]) -> str:
-    """The domain an `aws-waf-token` cookie is set on: the registrable one.
+_WAF_COOKIE_DOMAINS_RE = re.compile(r"awsWafCookieDomainList\s*=\s*\[([^\]]*)\]")
 
-    `.binance.com` for www.binance.com and p2p.binance.com alike. The site's
-    own WAF integration keeps the token there, and a copy scoped to
-    www.binance.com alone did not clear the CAPTCHA (2026-09-24).
+
+def cookie_domain(host: Optional[str], html: Optional[str] = None) -> str:
+    """The domain an `aws-waf-token` cookie is set on: the one the SITE says.
+
+    AWS WAF's own integration names it on the challenge page, in
+    `window.awsWafCookieDomainList`, and the token cookie goes on the listed
+    domain that covers the page's host, or on the host itself when the list
+    is empty. Measured 2026-09-24:
+
+        binance.com         ['binance.com','binance.bh', ...]  -> .binance.com
+        transfermarkt.com   []                                 -> the host
+
+    On binance, a token scoped to www.binance.com alone left the page on
+    "Human Verification", and the same token on .binance.com was served. So
+    "the registrable domain" was binance's list, not a rule, and a site with
+    an empty list wants the host.
     """
-    parts = (host or "www.binance.com").lower().split(".")
-    return "." + ".".join(parts[-2:]) if len(parts) >= 2 else (host or "")
+    host = (host or "www.binance.com").lower()
+    listed = None
+    if html:
+        m = _WAF_COOKIE_DOMAINS_RE.search(html)
+        if m:
+            listed = [d.strip().strip("'\"").lower().lstrip(".")
+                      for d in m.group(1).split(",") if d.strip().strip("'\"")]
+    if listed is None:
+        # No page to read it from: this site's list, as measured.
+        listed = ["binance.com"]
+    for d in listed:
+        if host == d or host.endswith("." + d):
+            return "." + d
+    return host
 
 
 # ---------------------------------------------------------------------------

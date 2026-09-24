@@ -141,20 +141,17 @@ jobs:
         run: .venv/bin/pip check
 
       - name: Offline suite, with ${{ matrix.engine }} actually importable
-        # The suite prints "SKIP <engine>_scraper — engine library absent" for
-        # each engine it could not import. In this job that engine IS
-        # installed, so a skip naming it means a real import error rather
-        # than an expected absence — the other two engines are absent here by
-        # design and their skips are fine.
-        #
-        # The pattern is the suite's OWN wording. The copy this repo inherited
-        # grepped for "could not be imported", a phrase the suite never
-        # prints, so this step could not fail. Checked against a real log of
-        # the suite run without the engine, where it DOES match.
+        # The engine this job installed must IMPORT. Checked directly, and
+        # not by grepping the suite's log: the family's copy grepped for a
+        # phrase its suites never printed, so it could not fail (measured
+        # 2026-09-24: 2 of 31 logs carried it), and a grep for this suite's
+        # current wording would break the day that wording changes. Every
+        # engine imports its driver at module level (smoke_test.py asserts
+        # it), so a broken import fails here by name.
         run: |
           set -o pipefail
           .venv/bin/python smoke_test.py | tee smoke.log
-          if grep -q "SKIP ${{ matrix.engine }}_scraper " smoke.log; then
+          if ! .venv/bin/python -c "import ${{ matrix.engine }}_scraper"; then
             echo "FAILED: ${{ matrix.engine }}_scraper failed to import even though"
             echo "        ${{ matrix.engine }} is installed in this job."
             exit 1
