@@ -398,7 +398,7 @@ def handle_captcha_if_present(page, args, proxy: Optional[str] = None) -> bool:
         logger.error("Solving the AWS WAF CAPTCHA failed (%s) — continuing.",
                      _mask_credentials(str(e)))
         return False
-    domain = page_flow.cookie_domain(urlparse(page.url).hostname)
+    domain = page_flow.cookie_domain(urlparse(page.url).hostname, html)
     # AWS WAF reads its answer back from a COOKIE, not a form field. Set on
     # the context so the reload and every fetch() after it carry it, and on
     # the REGISTRABLE domain, which is where the site's own WAF integration

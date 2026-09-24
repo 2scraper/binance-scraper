@@ -335,7 +335,7 @@ def handle_captcha_if_present(ops, args, proxy: Optional[str] = None) -> bool:
         logger.error("Solving the AWS WAF CAPTCHA failed (%s) — continuing.",
                      _mask_credentials(str(e)))
         return False
-    domain = page_flow.cookie_domain(urlparse(url).hostname)
+    domain = page_flow.cookie_domain(urlparse(url).hostname, html)
     try:
         ops.driver.add_cookie({"name": AWS_WAF_COOKIE, "value": token,
                                "domain": domain, "path": "/"})
