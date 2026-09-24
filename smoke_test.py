@@ -1035,6 +1035,23 @@ def check_credential_scan_is_one_implementation_invoked_from_both():
           result.returncode == 0, (result.stdout + result.stderr)[-600:])
 
 
+def check_no_workflow_imports_the_code_inline():
+    """The first push of this repo went red on an inline heredoc in
+    tests.yml doing `from output_writer import Business`: the donor repo's
+    row class, invisible to every local run because nothing local executes a
+    workflow. A workflow calls ci_checks.py or the CLIs; it does not carry
+    its own copy of a check that imports the code."""
+    wf_dir = os.path.join(HERE, ".github", "workflows")
+    if not os.path.isdir(wf_dir):
+        skip("workflows", "no .github directory (the image)")
+        return
+    local = {f[:-3] for f in os.listdir(HERE) if f.endswith(".py")}
+    pattern = re.compile(r"^\s*(?:from|import)\s+(%s)\b" % "|".join(sorted(local)), re.M)
+    for name in sorted(os.listdir(wf_dir)):
+        hits = pattern.findall(open(os.path.join(wf_dir, name), encoding="utf-8").read())
+        check("%s imports no local module inline" % name, not hits, repr(hits))
+
+
 def check_the_hex_exemption_is_one_context_only():
     """SITE_PUBLIC_IDS forgives a 32-hex inside an announcement address and
     NOTHING else. Planted, not assumed."""
