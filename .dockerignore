@@ -11,7 +11,7 @@ __pycache__/
 .venv/
 venv/
 env/
-bbb_businesses.*
+binance_rows.*
 *_debug.html
 *_debug.png
 live_results/

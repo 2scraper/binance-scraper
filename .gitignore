@@ -11,12 +11,34 @@
 # the exact output shape without installing anything.
 !sample_output.json
 !sample_output.csv
-bbb_businesses.*
-bbb_businesses_*.*
+!sample_output_copytrading.json
+!sample_output_copytrading.csv
+!sample_output_announcements.json
+!sample_output_announcements.csv
+!fixtures_generated.json
+binance_rows.*
+binance_rows_*.*
 
 # --- the live-test harness's working directory ---------------------------
 live_results/
 live_results.zip
+# ANY working directory a live run writes into, by KIND rather than by the one
+# name an older repo used (CLAUDE.md §24). Measured here: `live/` was not
+# listed, and a `--dump-html` of a 3-page run wrote `canary_dump.json.page3`,
+# which `*.json` does not cover. It sat untracked and NOT ignored, one
+# `git add -A` from a commit, until the credential scan flagged the 32-hex
+# announcement codes inside it.
+live/
+out/
+output/
+run/
+runs/
+result/
+results/
+tmp/
+scratch/
+dump/
+dumps/
 
 # --- debug artifacts the engines drop next to themselves -----------------
 # Written on purpose when a page yields nothing or comes back blocked, and by
@@ -24,9 +46,11 @@ live_results.zip
 *_debug.html
 *_debug.png
 *.html.page*
+*.json.page*
+*.page[0-9]*
 
 # --- captures kept for parser work ---------------------------------------
-# The smoke suite's fixtures are committed (trimmed, inside smoke_test.py);
+# The smoke suite's fixtures are committed (trimmed, in fixtures_generated.json);
 # the multi-megabyte originals they were cut from are not.
 captures/
 

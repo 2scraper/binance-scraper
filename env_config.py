@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 # Keeping this explicit means a typo in .env is reported rather than ignored.
 ENV_KEYS = {
     "TWOCAPTCHA_KEY": "twocaptcha_key",
-    "BBB_CDP_ENDPOINT": "cdp_endpoint",
-    "BBB_PROXY": "proxy",
-    "BBB_URL": "url",
+    "BINANCE_CDP_ENDPOINT": "cdp_endpoint",
+    "BINANCE_PROXY": "proxy",
+    "BINANCE_URL": "url",
 }
 # Deliberately NOT here: an output prefix. `--out` already carries a non-empty
 # default, so `apply()` would never see it as unset and the variable would be
@@ -141,7 +141,7 @@ def load_env(path=None, override=False):
 def unknown_keys(path=None):
     """Keys present in .env that nothing in this project reads.
 
-    Usually a typo — `TWO_CAPTCHA_KEY`, `BBB_CDP` — which otherwise fails
+    Usually a typo — `TWO_CAPTCHA_KEY`, `BINANCE_CDP` — which otherwise fails
     silently as "the key just isn't being picked up".
     """
     if path is None:

@@ -3,9 +3,9 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "bbb-scraper"
-version = "1.0.2"
-description = "Better Business Bureau (bbb.org) scraper: keyword searches, category listings and business profiles."
+name = "binance-scraper"
+version = "0.1.0"
+description = "binance.com scraper: P2P adverts, Futures copy-trading lead portfolios and announcements, from the site's own JSON endpoints (Playwright, Selenium or pyppeteer)."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.9"
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/2scraper/bbb-scraper"
+Homepage = "https://github.com/2scraper/binance-scraper"
 
 # Mirrors requirements-playwright.txt / requirements-puppeteer.txt /
 # requirements-selenium.txt. Install exactly one — see those files for why:

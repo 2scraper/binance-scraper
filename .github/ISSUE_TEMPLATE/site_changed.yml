@@ -1,52 +1,53 @@
-name: Site changed / selectors broke
-description: Etsy changed something and the parser no longer matches.
+name: Site changed / API broke
+description: binance.com changed an endpoint and the parser no longer matches.
 labels: ["site-change"]
 body:
   - type: markdown
     attributes:
       value: |
-        This is the most common way a scraper stops working, and it is worth its
-        own report because the fix is different from a code bug: something on
-        etsy.com moved.
+        This is the most common way a scraper stops working, and it is worth
+        its own report because the fix is different from a code bug:
+        something on binance.com moved.
 
-        Useful to know before filing: the parser tries **JSON-LD first**, then a
-        CSS + URL-pattern fallback. Which one broke narrows the fix a lot.
+        Useful to know before filing: this repo reads NO HTML. Every row comes
+        from one of three JSON endpoints the site's own front end calls
+        (`product_parser.py` lists them), so a break is almost always a
+        renamed field, a new required parameter, or an endpoint going behind
+        the site's AWS WAF.
 
   - type: dropdown
     id: what_broke
     attributes:
       label: What stopped matching
       options:
-        - Products (0 rows on a page that visibly has products)
-        - A specific field is null or wrong (price, sku, image, URL)
-        - original_price or lowest_price_30d empty out (the tile overlay)
-        - DOM price confirmation dropped below 90% in the run log
-        - Pagination stops early or repeats a page
-        - The captcha detector finds nothing on a page that has one
+        - The run stops with "The endpoint refused this request (code ...)"
+        - 0 rows on a query that visibly has results on the site
+        - A specific column is null or wrong on every row
+        - Every run is blocked by aws-waf, even from a residential exit
+        - Pagination stops early or repeats rows
         - Something else
     validations:
       required: true
 
   - type: input
-    id: url
+    id: query
     attributes:
-      label: URL
-      description: The exact listing URL, and the country your exit IP was in.
-      placeholder: "https://www.etsy.com/search?q=handmade+mug (locale: /de/, exit IP: DE residential, Scraping Browser pid: etsy1)"
+      label: Mode and query
+      description: The mode and flags (or --url), and the country your exit IP was in.
+      placeholder: "--mode p2p --asset USDT --fiat EUR --side buy (exit IP: DE residential)"
     validations:
       required: true
 
   - type: textarea
     id: evidence
     attributes:
-      label: Evidence from the page
+      label: Evidence
       description: |
         Whichever of these you can get. A capture beats a description.
 
-        - JSON-LD as the page actually serves it:
-          `python3 -c "import json,sys,re;h=open('dump.html').read();print([m[:400] for m in re.findall(r'<script type=\"application/ld\\+json\">(.*?)</script>',h,re.S)][:2])"`
-        - Or open devtools and paste one `Product` node from the `ItemList`.
-        - For a field problem: the value you got, and the value on the page.
+        - The response as the parser saw it: re-run with
+          `--dump-html response.json` and paste the first record (it is JSON).
+        - For a column problem: the value you got, and the value the site shows.
       render: text
     validations:
       required: true

@@ -1,0 +1,72 @@
+[
+  {
+    "source": "binance.com",
+    "scraped_at": "2026-09-24T08:20:16.659824+00:00",
+    "url": "https://www.binance.com/en/support/announcement/detail/7d17add1ffe6416391f65a001734e1c7",
+    "sku": "285338",
+    "title": "Binance Will Close UAH Deposits and Withdrawals via Fiat Trade UAH and Delist USDT/UAH Spot Trading Pair",
+    "catalog_id": 161,
+    "catalog_name": "Delisting",
+    "released_at": "2026-09-23T07:00:00+00:00",
+    "page": 1,
+    "position": 1,
+    "mode": "announcements",
+    "data_source": "bapi"
+  },
+  {
+    "source": "binance.com",
+    "scraped_at": "2026-09-24T08:20:16.659838+00:00",
+    "url": "https://www.binance.com/en/support/announcement/detail/262bbb7dcdc243b09e854742e57e1e8e",
+    "sku": "285188",
+    "title": "Notice of Removal of Margin Trading Pairs - 2026-09-25",
+    "catalog_id": 161,
+    "catalog_name": "Delisting",
+    "released_at": "2026-09-22T08:00:01.264000+00:00",
+    "page": 1,
+    "position": 2,
+    "mode": "announcements",
+    "data_source": "bapi"
+  },
+  {
+    "source": "binance.com",
+    "scraped_at": "2026-09-24T08:20:16.659845+00:00",
+    "url": "https://www.binance.com/en/support/announcement/detail/545ca5ad28254999b793bcf1ddd51f93",
+    "sku": "285157",
+    "title": "Notice of Removal of Spot Trading Pairs - 2026-09-25",
+    "catalog_id": 161,
+    "catalog_name": "Delisting",
+    "released_at": "2026-09-22T06:00:00+00:00",
+    "page": 1,
+    "position": 3,
+    "mode": "announcements",
+    "data_source": "bapi"
+  },
+  {
+    "source": "binance.com",
+    "scraped_at": "2026-09-24T08:20:16.659851+00:00",
+    "url": "https://www.binance.com/en/support/announcement/detail/30b1347d97324180bb469c761e4eed5a",
+    "sku": "284618",
+    "title": "Notice of Removal of Spot Trading Pairs - 2026-09-18",
+    "catalog_id": 161,
+    "catalog_name": "Delisting",
+    "released_at": "2026-09-16T05:30:00+00:00",
+    "page": 1,
+    "position": 4,
+    "mode": "announcements",
+    "data_source": "bapi"
+  },
+  {
+    "source": "binance.com",
+    "scraped_at": "2026-09-24T08:20:16.659856+00:00",
+    "url": "https://www.binance.com/en/support/announcement/detail/61e6132794e14f4495ba3314d2d1fc27",
+    "sku": "284587",
+    "title": "Notice of Removal of Margin Trading Pairs - 2026-09-18",
+    "catalog_id": 161,
+    "catalog_name": "Delisting",
+    "released_at": "2026-09-15T10:00:15.716000+00:00",
+    "page": 1,
+    "position": 5,
+    "mode": "announcements",
+    "data_source": "bapi"
+  }
+]

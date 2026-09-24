@@ -490,8 +490,8 @@ def detect_page_state(text: Optional[str], status: Optional[int] = None,
                     markers on the page
         throttled   429, or 418 (the site's own "you kept going after
                     429" answer)
-        restricted  451. The site refuses the exit's COUNTRY. Binance's
-                    public API gives that answer to US addresses.
+        restricted  451, the status's own meaning: the exit's COUNTRY is
+                    refused. Not observed on this site (page_flow).
         blocked     403, or any other refusal with no widget
         unknown     anything else: not JSON, not an interstitial
 

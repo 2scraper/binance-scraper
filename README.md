@@ -1,162 +1,147 @@
-# bbb-scraper
+# binance-scraper
 
-[![release](https://img.shields.io/github/v/release/2scraper/bbb-scraper)](https://github.com/2scraper/bbb-scraper/releases)
-[![tests](https://github.com/2scraper/bbb-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/bbb-scraper/actions/workflows/tests.yml)
-[![canary](https://github.com/2scraper/bbb-scraper/actions/workflows/canary.yml/badge.svg)](https://github.com/2scraper/bbb-scraper/actions/workflows/canary.yml)
+[![release](https://img.shields.io/github/v/release/2scraper/binance-scraper)](https://github.com/2scraper/binance-scraper/releases)
+[![tests](https://github.com/2scraper/binance-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/binance-scraper/actions/workflows/tests.yml)
+[![canary](https://github.com/2scraper/binance-scraper/actions/workflows/canary.yml/badge.svg)](https://github.com/2scraper/binance-scraper/actions/workflows/canary.yml)
 ![python](https://img.shields.io/badge/python-3.9%20%7C%203.12-blue)
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 ![engines](https://img.shields.io/badge/engines-playwright%20%7C%20selenium%20%7C%20pyppeteer-lightgrey)
-![runs without an account](https://img.shields.io/badge/search%20%26%20category-no%20account%20needed-brightgreen)
+![runs without an account](https://img.shields.io/badge/all%20three%20modes-no%20account%20needed-brightgreen)
 
-Scrapes business listings and business profiles from the **Better Business
-Bureau** ([bbb.org](https://www.bbb.org)) — name, address, phone numbers, BBB
-letter grade, accreditation, categories, coordinates, and on a profile the
-accreditation date, years in business and complaint counts.
+Scrapes three things from [binance.com](https://www.binance.com) that its
+pages show every visitor, into JSON and CSV:
 
-Three engines (Playwright, Selenium, pyppeteer) plus a browserless client for
-2Captcha's Scraper API. One row schema, one exit-code contract, one sidecar.
+| `--mode` | what | one row per | per page |
+|---|---|---|---|
+| `p2p` (default) | the **P2P order book** for an asset/fiat pair: price, limits, payment methods, the advertiser's 30-day completion and feedback | advert | 20 adverts |
+| `copytrading` | **Futures copy-trading lead portfolios**: ROI, PnL, max drawdown, win rate, AUM, copier PnL, copiers and seats, badge | portfolio | 30 portfolios |
+| `announcements` | an **announcement catalogue**: new listings, delistings, news, maintenance, API updates, airdrops | article | 50 announcements |
+
+Every run writes a `<out>.meta.json` beside the output with the site's own
+total, so a file can say "90 of 8,920" rather than only "90".
+
+Binance's official API is for market data and your own account. Its
+announcement feed is an [API-key-authenticated WebSocket](https://developers.binance.com/docs/cms/general-info).
+This repo reads the public lists the site's own pages are built from.
 
 ---
 
 ## Start with the part most scrapers bury
 
-**You do not need an account, a key or a proxy to read BBB's listings.**
+**You need no key, no proxy and no account for any of the three modes.**
 
-BBB's own front end renders search and category pages out of a JSON endpoint,
-and that endpoint is not behind Cloudflare. Measured **2026-09-16** from a
-datacenter VPS in Nuremberg (netcup, AS197540) — an address that gets HTTP
-**403 on every HTML page on the site**:
+Measured 2026-09-24 from a datacentre VPS (netcup, Nuremberg):
 
-```
-GET https://www.bbb.org/api/search?find_country=USA&find_text=restaurants
-    &find_loc=New%20York%2C%20NY&page=1     ->  HTTP 200, 57 KB of JSON
-```
+| what was asked | answer |
+|---|---|
+| any HTML page on binance.com, plain curl | HTTP 202, empty body, `x-amzn-waf-action: challenge` (AWS WAF) |
+| an announcement page in real Chromium, headless and headful | "Human Verification": AWS WAF's CAPTCHA |
+| the three JSON endpoints the site's own front end calls, plain curl | **HTTP 200 and complete JSON** |
 
-Fifteen complete business records, richer than the rendered tile. A two-page
-run from that machine with no `.env` at all returned **30 rows,
-`status: complete`**.
+So the pages are gated and the data is not. Each engine lands a browser on
+one of those endpoints and issues every page as a same-origin `fetch()`, so
+no page is ever rendered. A full USDT/EUR buy-side order book, 10 pages,
+came back as **196 of 196 adverts** in 13 seconds with nothing configured.
 
-What the 2Captcha products actually buy here is **`--mode profile`**. A
-business profile page IS Cloudflare-gated, and there is no endpoint for it —
-`/api/businessprofile`, `/api/profile`, `/api/orgs`, `/api/reviews` and
-`/api/complaints` all return BBB's 404 page — so the rendered page is the only
-route to accreditation dates, complaint counts and the rest.
-
-| | listings (`search`, `category`) | profiles (`profile`) |
-|---|---|---|
-| Cloudflare | **not gated** | gated, HTTP 403 |
-| needs a key | no | no |
-| needs a residential exit | **no** | **yes** |
-| measured from a datacenter IP | 200, 30 rows, complete | 403 |
+What the paid products buy here is insurance and scale, and the section
+below says exactly which one does what.
 
 ---
 
 ## Install
 
 ```bash
-git clone https://github.com/2scraper/bbb-scraper.git
-cd bbb-scraper
-pip install -r requirements.txt -r requirements-playwright.txt
-playwright install chromium
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt -r requirements-playwright.txt
+./venv/bin/playwright install chromium
 ```
 
-**Install exactly one engine.** The three declare mutually unsatisfiable pins
-— playwright and pyppeteer disagree on `pyee`, pyppeteer and selenium on
-`urllib3` — so `pip check` reports a conflict if you install more than one.
-Use a virtualenv per engine if you need several.
+Install **one** engine per virtualenv: the three libraries pin versions of
+their dependencies that cannot all be satisfied at once.
 
 ## Run
 
 ```bash
-# a keyword search, three pages
-python playwright_scraper.py --text restaurants --location "New York, NY" --pages 3
+# P2P: adverts you could BUY USDT from, paying EUR, every page
+./venv/bin/python playwright_scraper.py --asset USDT --fiat EUR --side buy --pages 50
 
-# a category listing
-python playwright_scraper.py --mode category \
-    --url "https://www.bbb.org/us/category/restaurants" --pages 3
+# ...only those taking SEPA Instant (the site's identifier, checked before the search)
+./venv/bin/python playwright_scraper.py --fiat EUR --pay-type SEPAinstant
 
-# one business profile (this is the one that needs a residential exit)
-python playwright_scraper.py --mode profile \
-    --url "https://www.bbb.org/us/ny/bronx/profile/cleaning-services/proclean-maintenance-systems-inc-0121-134716"
+# copy-trading: the top 150 portfolios by 7-day PnL
+./venv/bin/python playwright_scraper.py --mode copytrading --time-range 7D --sort-by pnl --pages 5
 
-# Canada
-python playwright_scraper.py --country CAN --text plumbers --location "Toronto, ON"
+# announcements: the delisting catalogue
+./venv/bin/python playwright_scraper.py --mode announcements --category delisting --pages 2
+
+# or read the query from a page's address
+./venv/bin/python playwright_scraper.py --url "https://p2p.binance.com/en/trade/sell/BTC?fiat=TRY"
 ```
 
-Output: `bbb_businesses.json`, `bbb_businesses.csv` and a
-`bbb_businesses.meta.json` sidecar describing the run. See
-[`sample_output.json`](sample_output.json) — 10 rows, 53 columns, cut from a
-real run.
+`--pages` is planned against the total the site states on page 1, so asking
+for more pages than exist fetches all of them and stops.
+[sample_output.json](sample_output.json),
+[sample_output_copytrading.json](sample_output_copytrading.json) and
+[sample_output_announcements.json](sample_output_announcements.json) are five
+rows of each mode, cut from real runs. P2P rows have 29 columns,
+copy-trading rows 26 columns and announcement rows 12 columns.
 
 ---
 
-## Four things about BBB that will look like bugs
+## Five things about Binance that will look like bugs
 
-Each of these is the site, not the scraper, and each is measured.
+### 1. A buy query returns adverts marked "sell"
 
-### 1. "Best Match" is not a relevance ordering — it is an accredited placement
+An advert carries the **maker's** side. Asking for adverts you can buy from
+returns adverts whose own `tradeType` is `SELL`: 20 of 20 on the captured
+page, and 20 of 20 the other way round on a sell query. Every row keeps
+both: `side` is what you asked for, `advertiser_side` is what the advert
+says.
 
-BBB's own default sort returned **15 of 15 BBB Accredited businesses** on
-every page tried, and for `find_text=restaurants` returned cleaning services,
-hotel management and home improvement — **not one restaurant**. The same query
-under A-Z returned **0 of 15 accredited** and real name-matched restaurants.
+### 2. The API accepts wrong values and answers with something plausible
 
-So **this scraper defaults to `--sort a-z`**, which is the one place it
-deliberately disagrees with the site. A-Z is also the only ordering that is
-stable between runs, which is what a multi-page run needs. Pass
-`--sort best-match` to reproduce what a visitor sees.
+Measured on 2026-09-24:
 
-`sort` is a **column**, not just a sidecar field, because it changes *which*
-businesses are in the file rather than only their order.
+| sent | answer |
+|---|---|
+| copy-trading `dataType` = a made-up key | HTTP 200, a full list, under some other ordering |
+| copy-trading `pageSize` = 50 or 100 | HTTP 200 with **30** rows: silently capped |
+| P2P `payTypes` = an identifier with a typo | HTTP 200, `total: 0`, on a market full of adverts |
 
-### 2. A complete run can still be a 1.2% sample
+Each of those turns a typo into a run that looks healthy, so every
+parameter is allowlisted before anything is sent, and `--pay-type` is
+checked against the site's own list of payment methods for the fiat.
+`--pay-type "SEPA Instant"` (the name the page shows) is refused with
+"did you mean SEPAinstant?".
 
-BBB caps **every** query at **15 pages of 15** — 225 rows — however many it
-matched. One measured search reported `totalResults: 19016` against
-`totalPages: 15`. A category listing reported 234,844.
+Win rate is **not** offered as a `--sort-by`: the endpoint gave a nonsense
+key the same answer as `WIN_RATE`, so there is no evidence it sorts by it.
 
-The run is genuinely `status: complete`: it fetched everything BBB will serve
-for that query. The sidecar says both numbers and sets `capped_by_site`, so a
-consumer can tell "complete" from "exhaustive":
+### 3. `--sort-by` decides which portfolios are in the file
 
-```json
-{"status": "complete", "total_results": 19016, "pages_available": 15,
- "capped_by_site": true, "reachable_max": 225}
-```
+Copy-trading lists about 8,900 portfolios. A 5-page run holds the first 150
+**by the ordering you chose**, so the top 150 by ROI and the top 150 by AUM
+are different samples, not the same one reordered. The ordering is a
+column (`sort`), and `diff_runs.py` refuses to compare runs that differ in
+it. `--sort-by sharpe` also filters: it returned 5,568 portfolios against
+8,920 under every other key, because a portfolio with no Sharpe ratio is
+left out. And `--sort-by mdd` with the default `desc` puts **zero** drawdown
+first; that ordering is the site's.
 
-To go deeper, narrow the query: `--state NY` cut a 19,016-result search to
-6,693, and each slice gets its own 15 pages.
+### 4. The listings move while you read them
 
-Asking for page 16 answers **HTTP 500**, not an empty page — so the scraper
-plans against `totalPages` and never asks for it.
+P2P's total went from 186 to 187 between two requests a minute apart. A
+multi-page run of a live listing can see one row twice (the dedupe drops it
+and the log says so) or miss one that moved up across a page boundary after
+its page was fetched. No scraper can see the second.
 
-### 3. An unrated business is not rated zero
+### 5. A refused parameter is not a block
 
-BBB returns `rating: ""` with `ratingScore: 0.0` for a business it has not
-graded — **7 of 105** measured. Written through, that zero drags every average
-a consumer computes, so both `rating_grade` and `rating_score` are **null**.
-
-The two columns are one rating in two notations. Measured over those 105 rows:
-
-```
-A+  >= 97.0      A  94.0-95.9      A-  92.9-93.8      B-  80.0
-```
-
-There is no `rating` column, because the rest of this repo family fills that
-with a 0-to-5 float off a star widget and 100.0 there would mean something
-else entirely.
-
-### 4. One business can appear twice, and both rows are real
-
-`sku` is `{bbbId}_{businessId}_{addressId}` and identifies a business **at a
-location**. "AV Brad Construction LLC" came back twice on one page of fifteen:
-same `businessId`, two `addressId`s, two real locations. Dedupe on `sku`;
-`businessId` legitimately repeats.
-
-A profile row rebuilds the same `sku`, so a profile run **joins** a listing
-run. (BBB's profile object states its own id as `0_209366`, with a literal
-zero where the listing writes the bbbId — a row keyed on that would never have
-matched anything.)
+The announcements endpoint takes a page size from a fixed set, and answers
+anything else (12, 25, 30, 100) with **HTTP 400 and an empty body**. Classify
+that as a block and you go shopping for a proxy to fix a typo. Here it is
+`rejected`: the run stops at once with the site's own complaint, nothing is
+retried, and the exit code is 5 ("the data never arrived"), not 3.
 
 ---
 
@@ -164,67 +149,50 @@ matched anything.)
 
 | | |
 |---|---|
-| `playwright_scraper.py` | **Primary.** The only one with `--concurrency`. Authenticates a proxy and a remote CDP endpoint. |
-| `selenium_scraper.py` | Drives the Chrome you already have. **Cannot authenticate a proxy or a remote CDP endpoint** (`debuggerAddress` is a bare `host:port`), so it refuses a credentialled `--cdp-endpoint` with exit 2 — which makes it the wrong engine for `--mode profile` and a perfectly good one for the two listing modes, which need no credentials. |
-| `puppeteer_scraper.py` | pyppeteer is effectively unmaintained and its own README points at Playwright. It downloads its **own Chromium**, which failed to launch on the development machine (`Browser closed unexpectedly`) — pass `--chromium-path` to point at another one. |
-| `scraper_api_client.py` | One HTTP request per page via the 2Captcha Scraper API, no local browser. Built for `--mode profile`. **`--cdp-url` is required**: measured 2026-09-16, the same profile URL came back 403 plain and **200 with the profile parsing in full** when routed through a Scraping Browser session, at $0.0005. |
+| `playwright_scraper.py` | **Primary.** Authenticates a proxy and a remote CDP endpoint. |
+| `puppeteer_scraper.py` | pyppeteer is effectively unmaintained; here for parity. Authenticates a proxy and a CDP endpoint. `--chromium-path` points it at another browser if its own will not start. |
+| `selenium_scraper.py` | Drives the Chrome you already have. **Cannot authenticate a proxy or a remote CDP endpoint** (`debuggerAddress` is a bare `host:port`), so it refuses a credentialled `--cdp-endpoint` with exit 2. None of the modes needs either. |
+| `scraper_api_client.py` | No local browser: the 2Captcha Scraper API fetches the page. Reads `--mode announcements` only, the one endpoint with a URL. The P2P and copy-trading endpoints answer POST, and **this repo does not implement a POST through the Scraper API**. Measured: 2 pages, 100 rows, $0.0005 a page. |
 
-**All three browser engines produce the same rows.** Measured on three live
-runs of the identical query on 2026-09-16: Playwright and Selenium were
-**byte-identical** ignoring `scraped_at`; pyppeteer returned the identical 30
-`sku`s with two of them swapped — both "11400 Inc", one business at two
-addresses. BBB's A-Z ordering does not break a tie between two locations of
-one business deterministically, so **`position` describes one fetch, not the
-directory**. The `sku` set is stable, which is what `diff_runs.py` keys on.
+The fetch loop itself (landing, the WAF, retries, throttling, rotation,
+parsing) is one implementation in `page_flow.py` that all three browser
+engines drive, so they cannot disagree about a page. Each was run live on
+2026-09-24 through the same seven scenarios (P2P buy and sell, copy-trading,
+announcements, `--concurrency`, a refused `--pay-type`, `--url`) with the
+same results.
 
 ---
 
 ## What the 2Captcha products buy, and when
 
-One key, four separately-billed products
-([2captcha.com](https://2captcha.com)):
+One key, four separately-billed products ([2captcha.com](https://2captcha.com)):
 
-* **A residential proxy** (`--proxy`, `--proxy-file`) — the thing that makes
-  `--mode profile` work. BBB refuses a datacenter address: measured on the
-  development VPS, the same profile URL was refused **identically on six
-  consecutive polls over 30 seconds, byte for byte**, headless and headful,
-  bundled Chromium and real Chrome alike. No amount of browser patching
-  changes an ASN.
-* **The Scraping Browser API** (`--cdp-endpoint`) — a remote browser, so you
-  run none. This is what every live profile measurement in this README was
-  taken through. One live connection per `pid`, which is why `--concurrency`
-  is refused with it.
-* **Captcha solving** — and it matters *which* product clears BBB's gate,
-  because the two are billed separately. BBB refuses in two shapes:
+* **Captcha solving**: AWS WAF's CAPTCHA, with the AmazonTask and
+  AmazonTaskProxyless task types
+  ([docs](https://2captcha.com/api-docs/amazon-aws-waf-captcha)). None of
+  the data endpoints showed that CAPTCHA to any engine, so a normal run buys
+  nothing. The path exists for the day the WAF moves in front of them. It
+  was run live on a page that IS gated, a binance.com announcement page:
 
-  | | title | what clears it |
-  |---|---|---|
-  | Managed Challenge | `Just a moment...` | a real Turnstile widget — cleared by `Captcha.setAutoSolve` over `--cdp-endpoint` |
-  | Hard block | `You have been blocked \| Better Business Bureau®` | nothing: no widget, no sitekey. A different exit is the only answer |
+  | | |
+  |---|---|
+  | one solve | 23-40 s, $0.00145, page served |
+  | the same session afterwards | three more gated pages, no further solve |
+  | control: the same page, no solve | 0 of 5 cleared by themselves in 25 s |
 
-  Both are HTTP 403 and both wear BBB's own branding, so the scrapers tell
-  them apart structurally. `--solve-captcha when-blocked` is the default and
-  the `blocked` state never spends.
-
-  **`--twocaptcha-key` alone does not clear the Managed Challenge here.** The
-  local solver in `captcha_solver.py` builds `RecaptchaV2Task`,
-  `RecaptchaV2TaskProxyless` and `RecaptchaV3TaskProxyless`, and **this repo
-  does not implement `TurnstileTaskProxyless`** — nor the init script that
-  captures `sitekey`, `action`, `cData` and `chlPageData` from Cloudflare's
-  one call to `turnstile.render()`, which is the only way to obtain them
-  (they appear nowhere in the served HTML). That is a gap in this repo and
-  not in the product: 2Captcha solves Turnstile, and `foodpanda-scraper` in
-  this family does exactly this. It is not implemented here because of where
-  the gate actually is: the listing path — which is what this scraper is
-  mostly for — is not behind Cloudflare at all, and the profile path, which
-  is, already needs a Scraping Browser session to be reachable (measured
-  2026-09-16: the same profile URL returned 403 direct and 200 in full
-  through one). On that path `Captcha.setAutoSolve` clears the challenge
-  inside the browser before a local solver would get a turn. The reCAPTCHA machinery is kept as a DETECTOR:
-  which challenge a visitor meets depends on the exit and on what the address
-  has been doing, and a narrow detector is how a challenge gets reported as
-  an empty page months later.
-* **Fingerprints** (`--fingerprint`) — a consistent device identity for a
+  The part that matters if you port this: the value that clears the WAF is
+  the solution's `existing_token`, set as the `aws-waf-token` cookie on the
+  **registrable** domain (`.binance.com`). A `captcha_voucher` set as the
+  cookie on the page's own host left the page on "Human Verification".
+  Selenium's Chrome was not shown the CAPTCHA at all on those pages (3 of 3),
+  so its copy of the solve path has not been exercised live.
+* **Proxies** (`--proxy`, `--proxy-file`): volume from more than one
+  address, and an exit in a country Binance serves. Binance's terms exclude
+  some jurisdictions, the United States among them.
+* **The Scraping Browser API** (`--cdp-endpoint`): a remote browser you do
+  not run, with a chosen exit country. One live connection per `pid`, so
+  `--concurrency` is refused with it.
+* **Fingerprints** (`--fingerprint`): a consistent device identity for a
   local browser. Ignored with `--cdp-endpoint`, which brings its own.
 
 Nothing here integrates a competitor.
@@ -237,60 +205,60 @@ Nothing here integrates a competitor.
 |---|---|
 | 0 | rows written |
 | 1 | crash |
-| 2 | bad usage |
-| 3 | blocked — Cloudflare, distinct from an empty result |
-| 4 | zero businesses — the query matched nothing |
-| 5 | remote API error (the Scraping Browser or Scraper API) |
-| 6 | partial — some pages came back and some did not |
+| 2 | bad usage, including a `--pay-type` the site does not offer |
+| 3 | blocked: AWS WAF, a 403 or a 451, distinct from an empty listing |
+| 4 | zero rows: the listing has nothing in it |
+| 5 | the data never arrived: a timeout, a dead proxy, a refused parameter, a remote API error |
+| 6 | partial: some pages came back and some did not |
 
 **A run that finds nothing writes nothing**, so a failure never replaces last
 night's good output with `[]`. `--allow-empty` is the opt-out.
+
+`diff_runs.py --old a.json --new b.json` compares two runs of the same mode
+and query by `sku`: new and vanished adverts, portfolios or articles, and
+every tracked column that changed.
 
 ---
 
 ## Configuration
 
-Credentials live in `.env` next to the scripts, never on a command line — a
-secret in `argv` is readable by anything that can run `ps`. Copy
-[`.env.example`](.env.example) and fill in what you use; `python3 env_config.py`
-prints what was picked up **without printing secrets**.
-
-Precedence: explicit flag → exported environment variable → `.env` → default.
+Credentials live in `.env` next to the scripts, never on a command line.
+Copy [`.env.example`](.env.example) and fill in what you use;
+`python3 env_config.py` prints what was picked up **without printing
+secrets**. Precedence: explicit flag → exported environment variable →
+`.env` → default.
 
 ---
 
 ## Tests
 
 ```bash
-python3 smoke_test.py          # 337 offline checks, no network, no engine needed
+python3 smoke_test.py          # offline, no network, no engine needed
 python3 smoke_test.py -v       # every check as it passes
 pytest                          # the same suite, one test
 ```
 
-The suite runs with no engine library installed and records every skip. CI
-installs each engine in its own virtualenv and fails if that engine's group
-reports one, because "skipped, engine absent" reads identically to a real
-import error.
+The fixtures are real API responses, trimmed and scrubbed by
+`make_fixtures.py`, which proves each one parses identically to its
+original. The suite also drives the shared fetch loop end to end with a fake
+browser: a full listing, a refused parameter, a 403, an empty listing, a
+throttle, a WAF challenge mid-run and a bad `--pay-type`.
 
-The [canary](.github/workflows/canary.yml) runs a real 3-page listing daily —
-**with no secrets**, because the listing path needs none, which is also what
-keeps that claim honest. The profile half skips with a notice when no
-`BBB_CDP_ENDPOINT` secret is set.
+The [canary](.github/workflows/canary.yml) runs a real 3-page scrape of each
+mode daily **with no secrets**, which is what keeps "no account needed"
+honest.
 
 ---
 
 ## Legal
 
-This reads **public pages** on bbb.org: search results, category listings and
-business profiles — the same pages a visitor sees, at a visitor's pace.
-
-It does not read anything behind a login, and it deliberately does **not**
-collect the named individuals BBB lists as a business's officers. There is no
-column for them: republishing a named person's details is a separate act from
-the site showing them on its own page.
+This reads **public data**: the P2P advert list, the public copy-trading
+leaderboard and the announcement catalogues, as the site's own pages fetch
+them for an anonymous visitor. It places no order, opens no trade, copies no
+portfolio and reads nothing behind a login.
 
 Rate limits, terms of service and the legality of scraping in your
-jurisdiction are your responsibility as the operator. `--delay` defaults to 2
-seconds; leave it there unless you have a reason.
+jurisdiction are your responsibility as the operator. `--delay` defaults to
+1 second between pages.
 
-MIT licensed. Not affiliated with or endorsed by the Better Business Bureau.
+MIT licensed. Not affiliated with or endorsed by Binance.

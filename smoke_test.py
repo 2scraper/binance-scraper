@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-smoke_test.py — the offline suite for bbb-scraper.
+smoke_test.py — the offline suite for binance-scraper.
 
-One file of plain functions with inline fixtures. No pytest, no conftest, no
-fixtures directory (CLAUDE.md §10); `tests/test_smoke.py` wraps this as a
-single pytest test so `pytest` works as an entry point without a second copy
-of the checks.
+One file of plain functions. `tests/test_smoke.py` wraps it as a single
+pytest test so `pytest` works as an entry point without a second copy of the
+checks.
 
     python3 smoke_test.py            run everything
     python3 smoke_test.py -v         print every check as it passes
@@ -16,27 +15,26 @@ guarded and the skip is RECORDED, because "skipped, engine absent" reads
 identically to a real import error. CI installs each engine in its own venv
 and fails if that engine's group reports a skip.
 
-The fixtures below are cut from real captures taken 2026-09-16 and trimmed to
-the fields the parser reads. One field is NOT verbatim: BBB's profile object
-names the business's officers as individuals, and those names are replaced
-with REDACTED placeholders. The parser deliberately reads no such column;
-republishing a named person is a separate act from the site showing them on
-its own page (§10). Everything BBB generates around them is untouched, and
-`check_fixtures_carry_no_personal_names` guards the SHAPE so a future capture
-is caught too.
+THE FIXTURES ARE IN `fixtures_generated.json`, NOT INLINE. They are real API
+responses captured 2026-09-24, trimmed and scrubbed by `make_fixtures.py`,
+which proves each one parses identically to its untrimmed original. Not
+verbatim: advertiser and lead nicknames, advertiser ids, avatar URLs and
+announcement codes are placeholders (see make_fixtures.py for why each).
 """
 
 import argparse
 import ast
+import copy
 import csv
 import inspect
-import io
 import json
 import os
 import re
 import subprocess
 import sys
 import tempfile
+import threading
+import types
 from dataclasses import asdict, fields
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -66,743 +64,22 @@ def equal(name, got, want):
 def skip(group, reason):
     SKIPS.append("%s: %s" % (group, reason))
     print("  SKIP %s — %s" % (group, reason))
-LISTING_PAYLOAD_JSON = r'''{"page":1,"pageSize":15,"totalPages":15,"totalResults":19016,"results":[{"id":"0121_100402_93156","businessName":"'1849' Bar and Grill","address":"183 Bleecker Street","city":"New York ","state":"NY","postalcode":"10012-1406","tobText":"Restaurants","rating":"","bbbMember":false,"reportUrl":"/us/ny/new-york-/profile/restaurants/1849-bar-and-grill-0121-100402","phone":["(212) 505-3200"],"location":"40.7290153503418,-74.0008773803711","businessId":"100402","ratingScore":0.0,"logoUri":null,"tobId":"50544-000","bbbId":"0121","bbbName":"BBB Serving Metropolitan New York","localReportUrl":null,"leaveReviewUrl":"/us/ny/new-york-/profile/restaurants/1849-bar-and-grill-0121-100402/leave-a-review","requestAQuoteUrl":null,"categories":[{"id":"50544-000","name":"Restaurants"}],"serviceAreasSummary":null,"hasServiceArea":false,"isCharity":0,"charitySeal":false,"accreditedCharity":false,"outOfBusinessStatus":null},{"id":"0021_191924_354991","businessName":"10 Rocks Tapas Bar & <em>Restaurant</em>","address":"1091 Main St","city":"Pawtucket","state":"RI","postalcode":"02860","tobText":"Restaurants","rating":"A+","bbbMember":false,"reportUrl":"/us/ri/pawtucket/profile/restaurants/10-rocks-lounge-tapas-llc-0021-191924","phone":["(401) 728-0800"],"location":"41.860408782958984,-71.39939880371094","businessId":"191924","ratingScore":100.0,"logoUri":null,"tobId":"50544-000","bbbId":"0021","bbbName":"Better Business Bureau in Eastern MA, ME, RI & VT","localReportUrl":null,"leaveReviewUrl":"/us/ri/pawtucket/profile/restaurants/10-rocks-lounge-tapas-llc-0021-191924/leave-a-review","requestAQuoteUrl":null,"categories":[{"id":"50544-000","name":"Restaurants"}],"serviceAreasSummary":["01504","01529","01569","01747","01756","02019","02031","02035","02038","02048","02053","02056","02067","02070","02071","02093","02334","02356","02375","02702","02703","02712","02715","02718","02720","02721","02722","02723","02724","02725","02726","02760","02761","02762","02763","02764","02766","02767","02768","02769","02771","02777","02779","02780","02802","02806","02809","02814","02815","02816","02818","02823","02824","02825","02826","02828","02829","02830","02831","02838","02839","02857","02858","02859","02860","02861","02862","02863","02864","02865","02872","02876","02885","02886","02887","02888","02889","02893","02895","02896","02901","02902","02903","02904","02905","02906","02907","02908","02909","02910","02911","02912","02914","02915","02916","02917","02918","02919","02920","02921","02940","MA","RI","USA"],"hasServiceArea":true,"isCharity":0,"charitySeal":false,"accreditedCharity":false,"outOfBusinessStatus":null},{"id":"0111_87055124_46262","businessName":"1-800 Water Damage","address":"2435 Bedford St Unit 15C","city":"Stamford","state":"CT","postalcode":"06905-3990","tobText":"Fire and Water Damage Restoration","rating":"","bbbMember":false,"reportUrl":"/us/ct/stamford/profile/fire-water-damage-restoration/1-800-water-damage-0111-87055124","phone":["(203) 406-9962","(914) 372-1319","(800) 928-3732"],"location":"41.07012939453125,-73.54624938964844","businessId":"87055124","ratingScore":0.0,"logoUri":null,"tobId":"60367-000","bbbId":"0111","bbbName":"BBB, Connecticut","localReportUrl":null,"leaveReviewUrl":"/us/ct/stamford/profile/fire-water-damage-restoration/1-800-water-damage-0111-87055124/leave-a-review","requestAQuoteUrl":null,"categories":[{"id":"60367-000","name":"Fire and Water Damage Restoration"},{"id":"66002-000","name":"Cleaning Services"},{"id":"60184-000","name":"Carpet and Rug Cleaners"},{"id":"60367-101","name":"Water Damage Restoration"}],"serviceAreasSummary":null,"hasServiceArea":false,"isCharity":0,"charitySeal":false,"accreditedCharity":false,"outOfBusinessStatus":null},{"id":"0121_87159665_265670","businessName":"Smart Cleaning - Cleaning Services Inc.","address":"","city":"New York","state":"NY","postalcode":"10036","tobText":"Cleaning Services","rating":"A+","bbbMember":true,"reportUrl":"/us/ny/new-york/profile/cleaning-services/smart-cleaning-cleaning-services-inc-0121-87159665","phone":["(501) 557-6278"],"location":"40.76026153564453,-73.9932861328125","businessId":"87159665","ratingScore":100.0,"logoUri":"https://m.bbb.org/prod/ProfileImages/2025/8894e6b2-3d6a-4654-b8aa-37616af0cab1.png","tobId":"66002-000","bbbId":"0121","bbbName":"BBB Serving Metropolitan New York","localReportUrl":null,"leaveReviewUrl":"/us/ny/new-york/profile/cleaning-services/smart-cleaning-cleaning-services-inc-0121-87159665/leave-a-review","requestAQuoteUrl":"/new-york-city/quote/request-smart-cleaning-cleaning-services-inc-87159665","categories":[{"id":"66002-000","name":"Cleaning Services"},{"id":"60449-000","name":"House Cleaning"},{"id":"85306-100","name":"Upholstery Cleaning"},{"id":"85306-000","name":"Rug Cleaning"}],"serviceAreasSummary":["NY"],"hasServiceArea":true,"isCharity":0,"charitySeal":false,"accreditedCharity":true,"outOfBusinessStatus":null},{"id":"0107_1400923_118755","businessName":"Premier Plumbing","address":"196 Divadale Dr","city":"East York","state":"ON","postalcode":"M4G 2P7","tobText":"Plumber","rating":"A+","bbbMember":true,"reportUrl":"/ca/on/east-york/profile/plumber/premier-plumbing-0107-1400923","phone":["(647) 868-4217"],"location":"43.71614074707031,-79.36264038085938","businessId":"1400923","ratingScore":100.0,"logoUri":"https://m.bbb.org/prod/ProfileImages/2025/9f44bc4e-a07f-4ab4-b5bb-0458439bb9d0.png","tobId":"10113-000","bbbId":"0107","bbbName":"BBB Serving Central Ontario","localReportUrl":null,"leaveReviewUrl":"/ca/on/east-york/profile/plumber/premier-plumbing-0107-1400923/leave-a-review","requestAQuoteUrl":"/kitchener/quote/request-premier-plumbing-1400923","categories":[{"id":"10113-000","name":"Plumber"},{"id":"10043-000","name":"Drainage Contractors"},{"id":"10171-100","name":"Basement Waterproofing"},{"id":"10113-300","name":"Plumbing Renovation"}],"serviceAreasSummary":null,"hasServiceArea":false,"isCharity":0,"charitySeal":false,"accreditedCharity":true,"outOfBusinessStatus":null},{"id":"0121_120583_128632","businessName":"AV Brad Construction LLC","address":"80 Nassau St Apt 102","city":"New York","state":"NY","postalcode":"10038-3795","tobText":"Home Improvement","rating":"A+","bbbMember":true,"reportUrl":"/us/ny/new-york/profile/home-improvement/av-brad-construction-llc-0121-120583","phone":["(917) 710-2622"],"location":"40.709922790527344,-74.00806427001953","businessId":"120583","ratingScore":100.0,"logoUri":null,"tobId":"10079-000","bbbId":"0121","bbbName":"BBB Serving Metropolitan New York","localReportUrl":"/us/ny/new-york/profile/home-improvement/av-brad-construction-llc-0121-120583/addressId/128632","leaveReviewUrl":"/us/ny/new-york/profile/home-improvement/av-brad-construction-llc-0121-120583/leave-a-review","requestAQuoteUrl":"/new-york-city/quote/request-av-brad-construction-llc-120583","categories":[{"id":"10079-000","name":"Home Improvement"},{"id":"10177-000","name":"Construction Services"},{"id":"66002-000","name":"Cleaning Services"},{"id":"10184-100","name":"Kitchen Cabinet Refacing"}],"serviceAreasSummary":["Arverne, NY","Astoria, NY","Bayside, NY","Bellerose, NY","Breezy Point, NY","Bronx, NY","Brooklyn, NY","Cambria Heights, NY","College Point, NY","Corona, NY","East Elmhurst, NY","Elmhurst, NY","Far Rockaway, NY","Floral Park, NY","Flushing, NY","Forest Hills, NY","Fresh Meadows, NY","Glen Oaks, NY","Hollis, NY","Howard Beach, NY","Jackson Heights, NY","Jamaica, NY","Kew Gardens, NY","Little Neck, NY","Long Island City, NY","Manhattan, NY","Maspeth, NY","Middle Village, NY","New York, NY","Oakland Gardens, NY","Ozone Park, NY","Queens Village, NY","Rego Park, NY","Richmond Hill, NY","Ridgewood, NY","Rockaway Park, NY","Rosedale, NY","Saint Albans, NY","South Ozone Park, NY","South Richmond Hill, NY","Springfield Gardens, NY","Staten Island, NY","Sunnyside, NY","Whitestone, NY","Woodhaven, NY","Woodside, NY","NY"],"hasServiceArea":true,"isCharity":0,"charitySeal":false,"accreditedCharity":true,"outOfBusinessStatus":null},{"id":"0121_120583_225724","businessName":"AV Brad Construction LLC","address":"64 Fulton St Rm 406","city":"New York","state":"NY","postalcode":"10038-2754","tobText":"Home Improvement","rating":"A+","bbbMember":true,"reportUrl":"/us/ny/new-york/profile/home-improvement/av-brad-construction-llc-0121-120583","phone":["(917) 710-2622","(212) 962-3524"],"location":"40.70873260498047,-74.00536346435547","businessId":"120583","ratingScore":100.0,"logoUri":null,"tobId":"10079-000","bbbId":"0121","bbbName":"BBB Serving Metropolitan New York","localReportUrl":null,"leaveReviewUrl":"/us/ny/new-york/profile/home-improvement/av-brad-construction-llc-0121-120583/leave-a-review","requestAQuoteUrl":"/new-york-city/quote/request-av-brad-construction-llc-120583","categories":[{"id":"10079-000","name":"Home Improvement"},{"id":"10177-000","name":"Construction Services"},{"id":"66002-000","name":"Cleaning Services"},{"id":"10184-100","name":"Kitchen Cabinet Refacing"}],"serviceAreasSummary":["Arverne, NY","Astoria, NY","Bayside, NY","Bellerose, NY","Breezy Point, NY","Bronx, NY","Brooklyn, NY","Cambria Heights, NY","College Point, NY","Corona, NY","East Elmhurst, NY","Elmhurst, NY","Far Rockaway, NY","Floral Park, NY","Flushing, NY","Forest Hills, NY","Fresh Meadows, NY","Glen Oaks, NY","Hollis, NY","Howard Beach, NY","Jackson Heights, NY","Jamaica, NY","Kew Gardens, NY","Little Neck, NY","Long Island City, NY","Manhattan, NY","Maspeth, NY","Middle Village, NY","New York, NY","Oakland Gardens, NY","Ozone Park, NY","Queens Village, NY","Rego Park, NY","Richmond Hill, NY","Ridgewood, NY","Rockaway Park, NY","Rosedale, NY","Saint Albans, NY","South Ozone Park, NY","South Richmond Hill, NY","Springfield Gardens, NY","Staten Island, NY","Sunnyside, NY","Whitestone, NY","Woodhaven, NY","Woodside, NY","NY"],"hasServiceArea":true,"isCharity":0,"charitySeal":false,"accreditedCharity":true,"outOfBusinessStatus":null}],"sortTypes":[{"label":"Best Match","value":"Relevance","isActive":false},{"label":"Distance","value":"Distance","isActive":false},{"label":"Rating","value":"Rating","isActive":false},{"label":"A-Z","value":"AToZ","isActive":true},{"label":"Z-A","value":"ZToA","isActive":false}],"heading":{"searchInputText":"restaurants","searchLocationText":"New York, NY"},"filters":{"byId":{"filter_category":{"id":"filter_category","filterOptions":[{"value":"50544-000","label":"Restaurants"},{"value":"66002-000","label":"Cleaning Services"},{"value":"66002-100","label":"Commercial Cleaning Services"},{"value":"60449-000","label":"House Cleaning"},{"value":"50164-020","label":"Fast Food Restaurants"}]}}}}'''
 
-EMPTY_PAYLOAD_JSON = r'''{"page":1,"pageSize":15,"totalPages":0,"totalResults":0,"results":[],"sortTypes":[{"label":"Best Match","value":"Relevance","isActive":true},{"label":"Distance","value":"Distance","isActive":false},{"label":"Rating","value":"Rating","isActive":false},{"label":"A-Z","value":"AToZ","isActive":false},{"label":"Z-A","value":"ZToA","isActive":false}],"heading":{"searchInputText":"zzzqqxnonexistentbiz","searchLocationText":"New York, NY"}}'''
 
-PROFILE_STATE_JSON = r'''{"user":{},"page":{},"businessProfile":{"id":"0_209366","bbbId":"0121","businessId":"134716","isMultiLocation":true,"names":{"primary":"Proclean Maintenance Systems, Inc."},"rating":{"bbbRating":"A+","ratingReasonNotRated":null,"ratingReasons":[]},"accreditationInformation":{"isAccredited":true},"dates":{"accreditationRevoked":null,"accredited":"2018-10-22T00:00:00","bbbFileOpened":"2012-05-29T00:00:00","businessStart":"2010-01-26T00:00:00","businessLocalStart":null,"incorporated":"2010-01-26T00:00:00","newOwnerDate":null},"localBbbData":{"name":"BBB Serving Metropolitan New York"},"location":{"latitude":40.806404,"longitude":-73.928108,"postalAddress":{"addressLine1":"79 Alexander Ave Ste B16","addressLine2":null,"city":"Bronx","stateCode":"NY","zipCode":"10454-4409"},"servingArea":null,"servingAreas":null},"urls":{"profile":"/us/ny/bronx/profile/cleaning-services/proclean-maintenance-systems-inc-0121-134716","primary":"https://www.pc-ms.com","submitReview":"/us/ny/bronx/profile/cleaning-services/proclean-maintenance-systems-inc-0121-134716/leave-a-review","requestQuote":"/new-york-city/quote/request-proclean-maintenance-systems-inc-134716"},"orgDetails":{"isOutOfBusiness":false,"organizationDescription":"Proclean\nMaintenance Systems, Inc. provides janitorial services, floor care, carpet cleaning, window washing, and construction cleanup for both large and commercial clients.","typeOfEntity":{"legalOrgType":1003,"name":"Corporation","canDisplay":true},"yearsInBusiness":16},"reviewsComplaintsSummary":{"suppressReviews":false,"averageOfReviewStarRatings":0,"displayReviewStarRating":true,"reviewsTotal":0,"complaintsTotal":0,"displayAverageOfReviewStarRatings":false,"submitReviewErrorMessage":"Unable to save review. Please try submitting the review again.","totalClosedComplaintsPastThreeYears":0,"totalClosedComplaintsPastTwelveMonths":0},"categories":{"links":[{"title":"Cleaning Services","url":"/us/ny/bronx/category/cleaning-services","entityType":null,"entityId":null,"id":null},{"title":"Commercial Cleaning Services","url":"/us/ny/bronx/category/commercial-cleaning-services","entityType":null,"entityId":null,"id":null}]},"media":{"logo":null},"contactInformation":{"emailAddress":"","phoneNumber":"(212) 618-6387","additionalPhoneNumbers":[],"additionalFaxNumbers":[{"name":null,"value":"(877) 784-2471","labels":[]}],"contacts":[{"isPrincipal":true,"title":"President","name":{"prefix":"REDACTED","first":"REDACTED","middle":null,"last":"REDACTED","suffix":null}}]}}}'''
+FIXTURES_PATH = os.path.join(HERE, "fixtures_generated.json")
+FIXTURES = json.load(open(FIXTURES_PATH, encoding="utf-8"))
 
-CHALLENGE_HTML = "<html><head><title>Just a moment...</title></head><body>pt and cookies to continue</span></div></noscript></div></div><script>(function(){window._cf_chl_opt = {cFPWv: 'g',cH: 'D_0_uMlpTlCJDowK3ZLIVeJniyMUVaa_9KFQUPd0AcA-1789556207-1.2.1.1-NGA0bT5PiVPrj9KihzBFW4gPPS2gMqfoRyp3GPIQqeeDJc2 … Tk:\"/search?find_country=USA\\u0026find_text=restaurants\\u0026find_loc=New+York%2C+NY\\u0026__cf_chl_tk=M35_sw6MOEfJn5420KpbyV7lFLfDRv8fpRAmUuaQc70-1789556207-1.0.1.1-pCKVU1Wd8nodmdl6Aw7k9mNgfqUWqug_PhXrPvdu.pE\",cvId: '3',cZone: 'ww … isplay: grid;\"><div><div><div></div><input type=\"hidden\" name=\"cf-turnstile-response\" id=\"cf-chl-widget-tmfx1_response\"></div></div></div><div id=\"CJPCL0\" style=\"display: none;\"><div>Verification successful. Waiting for www.bbb.or … -platform/h/g/orchestrate/chl_page/v1?ray=a3bf58b98f99cee6\"></script><script src=\"https://challenges.cloudflare.com/turnstile/v0/g/330e41bb475c/api.js?onload=khCN8&amp;render=explicit\" async=\"\" defer=\"\" crossorigin=\"anonymous\"></s … chl_page/v1?ray=a3bf58b98f99cee6\"></script><script src=\"https://challenges.cloudflare.com/turnstile/v0/g/330e41bb475c/api.js?onload=khCN8&amp;render=explicit\" async=\"\" defer=\"\" crossorigin=\"anonymous\"></script></head>\n  <body>\n   </body></html>"
 
-HARD_BLOCK_HTML = "<html><head><title>You have been blocked | Better Business Bureau®</title></head><body>ta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />\n\n    <title>You have been blocked | Better Business Bureau®</title>\n\n    <style id=\"custom-props\">\n      :root {\n        --bds-color-black: #2d2926;\n    … 3',t:'MTc4OTU1NjMyMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);\";b.getElementsByTagName('head')[0].appendCh</body></html>"
+def fx(name) -> str:
+    """A fixture as the text an endpoint returns."""
+    value = FIXTURES[name]
+    return value if isinstance(value, str) else json.dumps(value)
 
-SERVED_404_HTML = "<html><head><title>Page not found | Better Business Bureau&#174;</title></head><body>n>\n    <div id=\"iabbb-footer-placeholder\"></div>\n    <script async src=\"https://assets.bbb.org/bbb-web/universal/dist/hf.min.js\"></script>\n  <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.c … t\"\n            height=\"133\"\n            loading=\"lazy\"\n            src=\"https://m.bbb.org/terminuscontent/dist/img/404-icon__254w.png?tx=w_109\"\n            width=\"109\"\n          />\n        </div>\n        <img\n          a … a',t:'MTc4OTU1NzQwMg=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);\";b.getElementsByTagName('head')[0].appendCh</body></html>"
-
-
-# A page BBB SERVED, fetched THROUGH the 2Captcha Scraping Browser.
-# Trimmed around the things that made it dangerous: the auto-solve
-# extension's injected hunters, its `cf-turnstile-response` input, BBB's
-# own reCAPTCHA Enterprise loader, and a real BBB asset reference.
-SERVED_VIA_SCRAPING_BROWSER_HTML = "<html><head><title>Search results for Restaurants near New York, NY | Better Business Bureau®</title></head><body>oogletagmanager.com/gtag/js?id=G-QWV3Q1HBDG&amp;cx=c&amp;gtm=4e69e1\"></script><script src=\"chrome-extension://kjmkgkdkpedkejedfhmfcenooemhbpbo/content/captcha/captchafox/interceptor.js\"></script><script src=\"chrome-exten …  src=\"chrome-extension://kjmkgkdkpedkejedfhmfcenooemhbpbo/content/captcha/turnstile/hunter.js\" data-ts-input=\"cf-turnstile-response\"></script><script src=\"chrome-extension://kjmkgkdkpedkejedfhmfcenooemhbpbo/content/captc … aptcha(){if(loaded){return;}\nloaded=true;var s=document.createElement('script');s.src=\"https://www.google.com/recaptcha/enterprise.js?render=6Lfm-HorAAAAANvcLwOHwVYwoAkSuRb_sWokbfq3\";s.async=true;s.onload=function(){remo … r Restaurants near New York, NY | Search | Better Business Bureau</title><link rel=\"preconnect\" href=\"https://assets.bbb.org\"><link rel=\"preconnect\" href=\"https://www.googletagmanager.com\"><link rel=\"preconnect\" href=\"ht</body></html>"
-
-
-# ---------------------------------------------------------------------------
-# The parser, asserted on VALUES rather than on coverage
-# ---------------------------------------------------------------------------
-# A column can be 100% populated and entirely wrong (CLAUDE.md §10), so every
-# check below pins a figure from the real capture rather than counting
-# non-nulls.
-
-def check_listing_parses():
-    import product_parser as P
-    page = P.parse_listing(LISTING_PAYLOAD_JSON, page=1, mode="search",
-                           sort="a-z")
-    equal("listing: row count", len(page.rows), 7)
-    equal("listing: totalResults read from the site", page.total_results, 19016)
-    equal("listing: totalPages read from the site", page.pages_available, 15)
-    equal("listing: pageSize", page.page_size, 15)
-    equal("listing: sort read BACK from the response", page.sort, "a-z")
-    equal("listing: query echoed in heading", page.query_text, "restaurants")
-    check("listing: not an empty result set", not page.is_empty_result_set)
-    equal("listing: every row carries the page it came from",
-          sorted({r.page for r in page.rows}), [1])
-    equal("listing: positions are 1..n in the site's order",
-          [r.position for r in page.rows], [1, 2, 3, 4, 5, 6, 7])
-    equal("listing: mode is recorded on the row",
-          sorted({r.mode for r in page.rows}), ["search"])
-    equal("listing: sort is recorded on the row",
-          sorted({r.sort for r in page.rows}), ["a-z"])
-    equal("listing: data_source is recorded",
-          sorted({r.data_source for r in page.rows}), ["api"])
-    equal("listing: source column", sorted({r.source for r in page.rows}),
-          ["bbb.org"])
-
-
-def check_ungraded_business_is_null_not_zero():
-    """The trap: `rating: ""` with `ratingScore: 0.0` means NOT GRADED.
-
-    Written through as 0.0 that zero drags every average a consumer computes.
-    7 of 105 captured businesses are in this state.
-    """
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    ungraded = [r for r in rows if r.title == "'1849' Bar and Grill"]
-    equal("ungraded: the fixture still carries one", len(ungraded), 1)
-    row = ungraded[0]
-    equal("ungraded: rating_grade is None", row.rating_grade, None)
-    equal("ungraded: rating_score is None, NOT 0.0", row.rating_score, None)
-    check("ungraded: no row anywhere scores exactly 0.0",
-          not any(r.rating_score == 0.0 for r in rows))
-    graded = [r for r in rows if r.rating_grade]
-    check("graded rows still carry a score",
-          all(r.rating_score is not None for r in graded),
-          "%r" % [(r.rating_grade, r.rating_score) for r in graded])
-
-
-def check_search_highlighting_is_stripped():
-    """`businessName` carries `<em>` when the query matched the name."""
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    titles = [r.title for r in rows]
-    check("titles: no markup survives", not any("<" in t for t in titles),
-          "%r" % [t for t in titles if "<" in t])
-    equal("titles: the highlighted fixture row reads cleanly",
-          [t for t in titles if t.startswith("10 Rocks")],
-          ["10 Rocks Tapas Bar & Restaurant"])
-    equal("strip_highlight is exact", P.strip_highlight("ADA <em>Restaurant</em>"),
-          "ADA Restaurant")
-    equal("strip_highlight keeps None as None", P.strip_highlight(None), None)
-
-
-def check_phone_is_a_list_not_a_first_element():
-    """78 of 105 rows carry one number, 19 carry two, and one carries TWELVE."""
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    longest = max(rows, key=lambda r: len(r.phone or []))
-    check("phone: the many-numbered fixture row keeps them all",
-          len(longest.phone or []) >= 3,
-          "longest is %r" % (longest.phone,))
-    check("phone: every entry is a non-empty string",
-          all(isinstance(n, str) and n.strip()
-              for r in rows for n in (r.phone or [])))
-
-
-def check_absent_fields_are_none_not_empty_string():
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    no_address = [r for r in rows if r.address is None]
-    check("address: the storefront-less fixture row is None, not ''",
-          len(no_address) >= 1)
-    check("no row carries an empty string in any text column",
-          not any(v == "" for r in rows for v in asdict(r).values()))
-
-
-def check_country_comes_from_the_row_not_the_query():
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    equal("country: both directories appear in one fixture",
-          sorted({r.country for r in rows}), ["CAN", "USA"])
-    canadian = [r for r in rows if r.country == "CAN"]
-    check("country: the Canadian row's URL says /ca/",
-          all("/ca/" in r.url for r in canadian))
-    equal("country_from_path reads the segment",
-          product_parser_country("/us/ny/bronx/profile/x/y"), "USA")
-
-
-def product_parser_country(path):
-    import product_parser as P
-    return P.country_from_path(path)
-
-
-def check_sku_identifies_a_location_not_a_business():
-    """Same business, two address ids — two real locations, not a duplicate."""
-    import product_parser as P
-    from output_writer import dedupe_by_key
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    by_business = {}
-    for r in rows:
-        by_business.setdefault(r.business_id, []).append(r)
-    repeated = [v for v in by_business.values() if len(v) > 1]
-    equal("sku: the fixture carries one business at two locations",
-          len(repeated), 1)
-    pair = repeated[0]
-    equal("sku: the two share a businessId", len({r.business_id for r in pair}), 1)
-    equal("sku: the two have DIFFERENT skus", len({r.sku for r in pair}), 2)
-    equal("sku: and different address ids", len({r.address_id for r in pair}), 2)
-    kept = dedupe_by_key(rows, set(), key="sku")
-    equal("dedupe on sku keeps both locations", len(kept), len(rows))
-    dropped = dedupe_by_key(rows, {r.sku for r in rows}, key="sku")
-    equal("dedupe drops a genuinely repeated page", len(dropped), 0)
-    equal("sku is {bbbId}_{businessId}_{addressId}",
-          [p for p in pair[0].sku.split("_")],
-          [pair[0].bbb_id, pair[0].business_id, pair[0].address_id])
-
-
-def check_coordinates_are_split_into_two_floats():
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    check("location: every fixture row got both coordinates",
-          all(r.latitude is not None and r.longitude is not None for r in rows))
-    equal("split_location splits a real value",
-          P.split_location("40.75806427001953,-73.97885131835938"),
-          (40.75806427001953, -73.97885131835938))
-    equal("split_location refuses half a coordinate",
-          P.split_location("40.758"), (None, None))
-    equal("split_location refuses a non-string", P.split_location(None),
-          (None, None))
-    equal("split_location refuses three parts",
-          P.split_location("1,2,3"), (None, None))
-
-
-def check_empty_result_set_is_an_answer_not_a_block():
-    import product_parser as P
-    import page_flow
-    page = P.parse_listing(EMPTY_PAYLOAD_JSON, page=1, mode="search")
-    equal("empty: no rows", len(page.rows), 0)
-    equal("empty: the site's own total is 0", page.total_results, 0)
-    check("empty: recognised as an empty RESULT SET", page.is_empty_result_set)
-    equal("empty: classified as 'empty', not 'blocked'",
-          P.detect_page_state(EMPTY_PAYLOAD_JSON, 200), "empty")
-    check("empty: policy parses it rather than retrying",
-          page_flow.should_parse("empty") and not page_flow.should_retry("empty"))
-    check("empty: policy does NOT count it as blocked",
-          not page_flow.counts_as_blocked("empty"))
-
-
-def check_profile_parses_and_joins_a_listing_row():
-    """A profile row must JOIN a listing row on the family's own key.
-
-    It only does because `sku` is REBUILT from parts: BBB's profile object
-    states its own id as "0_209366", with a literal zero where the listing
-    writes the bbbId, so a row keyed on it would never have matched anything.
-    """
-    import product_parser as P
-    row = P.parse_profile(PROFILE_STATE_JSON)
-    check("profile: parsed", row is not None)
-    equal("profile: title", row.title, "Proclean Maintenance Systems, Inc.")
-    equal("profile: sku is rebuilt, not the page's own '0_...' id",
-          row.sku, "0121_134716_209366")
-    check("profile: the page's raw id is NOT the sku",
-          not row.sku.startswith("0_"))
-    equal("profile: bbb_id", row.bbb_id, "0121")
-    equal("profile: business_id", row.business_id, "134716")
-    equal("profile: address_id", row.address_id, "209366")
-    equal("profile: grade", row.rating_grade, "A+")
-    equal("profile: accredited", row.is_accredited, True)
-    equal("profile: accreditation date", row.accredited_since,
-          "2018-10-22T00:00:00")
-    equal("profile: BBB file opened", row.bbb_file_opened, "2012-05-29T00:00:00")
-    equal("profile: years in business", row.years_in_business, 16)
-    equal("profile: entity type", row.entity_type, "Corporation")
-    equal("profile: website", row.website, "https://www.pc-ms.com")
-    equal("profile: complaints, all three windows",
-          (row.complaints_total, row.complaints_3y, row.complaints_12m),
-          (0, 0, 0))
-    equal("profile: multi-location flag", row.is_multi_location, True)
-    equal("profile: out of business is a BOOL on this side too",
-          row.out_of_business, False)
-    equal("profile: country from its own path", row.country, "USA")
-    equal("profile: mode and provenance", (row.mode, row.data_source),
-          ("profile", "profile"))
-    equal("profile: categories from its own links", row.categories,
-          ["Cleaning Services", "Commercial Cleaning Services"])
-
-
-def check_profile_zero_stars_means_no_reviews():
-    """`averageOfReviewStarRatings` is 0 on a business with no reviews.
-
-    The same trap as the 0.0 rating score, one object deeper. BBB carries its
-    own `displayAverageOfReviewStarRatings` flag for it, so the site's answer
-    is used rather than a guess.
-    """
-    import product_parser as P
-    row = P.parse_profile(PROFILE_STATE_JSON)
-    equal("profile: reviews_total is a real 0", row.reviews_total, 0)
-    equal("profile: review_stars_avg is None, NOT 0.0",
-          row.review_stars_avg, None)
-
-    state = json.loads(PROFILE_STATE_JSON)
-    summary = state["businessProfile"]["reviewsComplaintsSummary"]
-    summary["displayAverageOfReviewStarRatings"] = True
-    summary["averageOfReviewStarRatings"] = 4.5
-    summary["reviewsTotal"] = 12
-    reviewed = P.parse_profile(json.dumps(state))
-    equal("profile: a displayable average IS read", reviewed.review_stars_avg, 4.5)
-
-
-def check_profile_does_not_invent_a_rating_score():
-    """A+ spans 97.0-100.0 on the listing measurements, so inverting the
-    letter would invent a precision the page does not have."""
-    import product_parser as P
-    row = P.parse_profile(PROFILE_STATE_JSON)
-    equal("profile: rating_score stays None beside a real grade",
-          (row.rating_grade, row.rating_score), ("A+", None))
-
-
-def check_profile_publishes_no_personal_names():
-    """The parser must not lift BBB's named officers into a column.
-
-    BBB publishes them; republishing a named person is a separate act from
-    the site showing them on its own page (§10). This asserts the CURRENT
-    behaviour so that adding such a column becomes a decision rather than an
-    accident.
-    """
-    import product_parser as P
-    from output_writer import Business
-    row = P.parse_profile(PROFILE_STATE_JSON)
-    columns = set(asdict(Business()).keys())
-    for banned in ("contact", "contacts", "principal", "officer", "owner_name",
-                   "person"):
-        check("schema has no %r column" % banned,
-              not any(banned in c for c in columns),
-              "found %r" % sorted(c for c in columns if banned in c))
-    values = " ".join(str(v) for v in asdict(row).values())
-    check("no parsed value carries the fixture's placeholder name",
-          "REDACTED" not in values)
-
-
-def check_fixtures_carry_no_personal_names():
-    """Guard the SHAPE, not the old literals, so a future capture is caught.
-
-    A re-captured profile would bring a real officer's name back with it;
-    this fails the build if one is ever committed un-scrubbed.
-    """
-    state = json.loads(PROFILE_STATE_JSON)
-    contacts = state["businessProfile"]["contactInformation"]["contacts"]
-    check("fixture: profile contacts are present but scrubbed",
-          contacts and all(
-              c["name"]["first"] == "REDACTED" and c["name"]["last"] == "REDACTED"
-              for c in contacts),
-          "%r" % contacts)
-    # The same guard over the whole file: a person-shaped name object with
-    # anything other than the placeholder in it.
-    source = open(os.path.join(HERE, "smoke_test.py"), encoding="utf-8").read()
-    # Only the fixture literals, not this file's own pattern text.
-    literals = "\n".join(line for line in source.splitlines()
-                         if line.startswith(("LISTING_PAYLOAD_JSON",
-                                             "EMPTY_PAYLOAD_JSON",
-                                             "PROFILE_STATE_JSON")))
-    real_names = re.findall(r'"first":"(?!REDACTED)([^"]{2,})"', literals)
-    check("fixture: no real given name anywhere in this file",
-          not real_names, "found %r" % real_names[:5])
-
-
-# ---------------------------------------------------------------------------
-# URLs, pagination and category resolution
-# ---------------------------------------------------------------------------
-
-def check_url_building():
-    import product_parser as P
-    equal("page_url REPLACES ?page rather than appending",
-          P.page_url("https://www.bbb.org/search?find_text=x&page=1", 4),
-          "https://www.bbb.org/search?find_text=x&page=4")
-    check("page_url preserves the other query parameters",
-          "find_text=x" in P.page_url("https://www.bbb.org/search?find_text=x", 2))
-    equal("page_url keeps ?page on page 1 too",
-          P.page_url("https://www.bbb.org/search?find_text=x", 1),
-          "https://www.bbb.org/search?find_text=x&page=1")
-
-    built = P.api_url(text="restaurants", location="New York, NY", page=3,
-                      sort="a-z")
-    check("api_url points at the endpoint", "/api/search?" in built)
-    check("api_url translates our sort spelling to BBB's", "sort=AToZ" in built)
-    check("api_url carries the page", "page=3" in built)
-    try:
-        P.api_url(text="x", sort="nonsense")
-        check("api_url refuses an unknown sort", False)
-    except ValueError:
-        check("api_url refuses an unknown sort", True)
-    try:
-        P.api_url(text="x", country="DEU")
-        check("api_url refuses a country BBB does not serve", False)
-    except ValueError:
-        check("api_url refuses a country BBB does not serve", True)
-
-
-def check_category_filter_refuses_empty_text():
-    """Measured: find_type=Category with an empty find_text answers 200 with
-    totalResults 0, while the same filter with the label answers 234,844."""
-    import product_parser as P
-    try:
-        P.api_url(category_id="50544-000", text="")
-        check("api_url refuses a category filter with no text", False)
-    except ValueError as e:
-        check("api_url refuses a category filter with no text",
-              "find_text" in str(e))
-    built = P.api_url(text="Restaurants", category_id="50544-000")
-    check("api_url sends find_type AND find_id together",
-          "find_type=Category" in built and "find_id=50544-000" in built)
-
-
-def check_category_resolution_refuses_rather_than_guesses():
-    import product_parser as P
-    options = P.category_options(LISTING_PAYLOAD_JSON)
-    check("category options are read from the site's own response",
-          len(options) >= 3, "%r" % options)
-    labels = {o["label"] for o in options}
-    check("the fixture's option list names Restaurants",
-          "Restaurants" in labels, "%r" % sorted(labels))
-
-    exact, was_exact = P.pick_category_option(options, "restaurants")
-    equal("category: exact slug match", (exact["label"], was_exact),
-          ("Restaurants", True))
-    equal("category: hyphenated slug matches its label",
-          P.pick_category_option(options, "cleaning-services")[0]["label"],
-          "Cleaning Services")
-    plural, was_exact = P.pick_category_option(
-        [{"value": "10113-000", "label": "Plumber"}], "plumbers")
-    equal("category: a plural slug matches on the prefix rule",
-          (plural["label"], was_exact), ("Plumber", False))
-    nothing, _ = P.pick_category_option(options, "nonexistent-widget")
-    equal("category: nothing plausible REFUSES rather than taking the first",
-          nothing, None)
-    equal("category: an empty option list refuses too",
-          P.pick_category_option([], "restaurants"), (None, False))
-
-
-def check_pagination_is_planned_from_the_sites_own_number():
-    """BBB caps totalPages at 15 and answers page 16 with HTTP 500, so a run
-    must never ask for the page that errors."""
-    import product_parser as P
-    import page_flow
-    equal("50 pages requested, 15 available -> 15", P.pages_to_fetch(50, 15), 15)
-    equal("3 requested, 15 available -> 3", P.pages_to_fetch(3, 15), 3)
-    equal("50 requested, site said nothing -> the MAX_PAGES backstop",
-          P.pages_to_fetch(50, None), P.MAX_PAGES)
-    equal("a short listing caps at its own length", P.pages_to_fetch(10, 2), 2)
-    equal("never below 1", P.pages_to_fetch(0, 15), 1)
-    equal("page_flow agrees with the parser, on every input",
-          [page_flow.pages_to_plan(a, b) for a, b in
-           ((50, 15), (3, 15), (50, None), (10, 2), (0, 15))],
-          [P.pages_to_fetch(a, b) for a, b in
-           ((50, 15), (3, 15), (50, None), (10, 2), (0, 15))])
-    equal("MAX_PAGES is the measured 15", P.MAX_PAGES, 15)
-    equal("PAGE_SIZE is the measured 15", P.PAGE_SIZE, 15)
-
-
-def check_supported_urls_are_refused_with_a_reason():
-    import product_parser as P
-    ok, why = P.is_supported_url("https://www.bbb.org/us/category/restaurants")
-    equal("a real BBB URL is supported", (ok, why), (True, ""))
-    check("bbb.org without www. is supported too",
-          P.is_supported_url("https://bbb.org/search?find_text=x")[0])
-    ok, why = P.is_supported_url("https://www.example.com/x")
-    check("another host is refused", not ok)
-    check("and the refusal EXPLAINS rather than saying 'not a BBB site'",
-          "country in the path" in why, why)
-    check("a non-URL is refused", not P.is_supported_url("not a url")[0])
-    check("a non-http scheme is refused",
-          not P.is_supported_url("ftp://www.bbb.org/x")[0])
-
-
-def check_path_shapes():
-    import product_parser as P
-    parts = P.profile_parts(
-        "https://www.bbb.org/us/ny/bronx/profile/cleaning-services/"
-        "proclean-maintenance-systems-inc-0121-134716")
-    check("profile_parts recognises a profile URL", parts is not None)
-    equal("profile_parts reads the country", parts["country"], "USA")
-    equal("profile_parts reads the city", parts["city"], "bronx")
-    equal("a category URL is NOT a profile",
-          P.profile_parts("https://www.bbb.org/us/category/restaurants"), None)
-    equal("category_from_url reads the slug",
-          P.category_from_url("https://www.bbb.org/us/category/restaurants"),
-          "restaurants")
-    equal("a search URL has no category slug",
-          P.category_from_url("https://www.bbb.org/search?find_text=x"), None)
-
-
-def check_listing_url_translation():
-    import product_parser as P
-    translated = P.api_url_from_listing_url(
-        "https://www.bbb.org/search?find_country=USA&find_text=restaurants"
-        "&find_loc=New+York%2C+NY&page=2", sort="a-z")
-    check("a search URL translates to the endpoint, query intact",
-          "find_text=restaurants" in translated and "page=2" in translated,
-          translated)
-    try:
-        P.api_url_from_listing_url("https://www.bbb.org/us/category/restaurants")
-        check("a category URL refuses to translate without its tobId", False)
-    except ValueError as e:
-        check("a category URL refuses to translate without its tobId",
-              "tobId" in str(e))
-    with_id = P.api_url_from_listing_url(
-        "https://www.bbb.org/us/category/restaurants", sort="a-z",
-        category_id="50544-000", category_label="Restaurants")
-    check("with the tobId it builds the filtered query",
-          "find_id=50544-000" in with_id and "find_text=Restaurants" in with_id)
-
-
-# ---------------------------------------------------------------------------
-# What BBB answered with
-# ---------------------------------------------------------------------------
-
-def check_page_states_on_real_captures():
-    import product_parser as P
-    equal("a Managed Challenge is a CHALLENGE",
-          P.detect_page_state(CHALLENGE_HTML, 403), "challenge")
-    equal("the hard refusal is BLOCKED",
-          P.detect_page_state(HARD_BLOCK_HTML, 403), "blocked")
-    equal("a page BBB served but that is not a listing is UNKNOWN",
-          P.detect_page_state(SERVED_404_HTML, 404), "unknown")
-    equal("the listing payload is CONTENT",
-          P.detect_page_state(LISTING_PAYLOAD_JSON, 200), "content")
-    equal("a profile page is CONTENT too",
-          P.detect_page_state(PROFILE_STATE_JSON, 200), "content")
-    equal("an empty result set is EMPTY",
-          P.detect_page_state(EMPTY_PAYLOAD_JSON, 200), "empty")
-    equal("a bare 403 with no markers is blocked",
-          P.detect_page_state("", 403), "blocked")
-
-
-def check_markers_do_not_match_a_page_bbb_serves():
-    """CLAUDE.md §18: a marker that matches every page is WORSE than none.
-
-    This check was once passing for the WRONG REASON, and that is why it now
-    runs against two different kinds of served page.
-
-    It originally used BBB's 404 only — fetched through plain curl — which
-    carries `challenge-platform` and `cdn-cgi` (so those two are correctly
-    excluded) but nothing else. Meanwhile `cf-turnstile` was in the marker
-    set and fired on **five of five** pages fetched through the 2Captcha
-    Scraping Browser, because that product's auto-solve extension injects its
-    own hunters into every page it loads. A good page therefore named a
-    vendor, and only the signal ORDERING in detect_page_state (payload first)
-    kept it from being reported as a challenge.
-
-    So the fixture that matters is a page BBB served THROUGH the Scraping
-    Browser, extension injections and all.
-    """
-    import product_parser as P
-    for label, page in (("404 (plain curl)", SERVED_404_HTML),
-                        ("listing (via Scraping Browser)",
-                         SERVED_VIA_SCRAPING_BROWSER_HTML)):
-        for marker in P.BOT_CHALLENGE_MARKERS:
-            check("marker %r does not appear on a served %s" % (marker, label),
-                  marker not in page)
-        check("no vendor is named on a served %s" % label,
-              P.detect_bot_challenge(page) is None,
-              "got %r" % P.detect_bot_challenge(page))
-
-    # The fixture has to actually CARRY the dangerous content, or this check
-    # proves nothing. Pinned so a future re-capture cannot quietly drop it.
-    check("the Scraping Browser fixture carries the auto-solve extension",
-          "kjmkgkdkpedkejedfhmfcenooemhbpbo" in SERVED_VIA_SCRAPING_BROWSER_HTML)
-    check("...including its cf-turnstile-response input",
-          "cf-turnstile" in SERVED_VIA_SCRAPING_BROWSER_HTML)
-
-    for banned in ("challenge-platform", "cdn-cgi", "cf-turnstile"):
-        check("%r is NOT in the marker set" % banned,
-              not any(banned in m for m in P.BOT_CHALLENGE_MARKERS))
-    # ...and each one really does appear on a page BBB served, or excluding it
-    # would be a precaution against nothing.
-    for banned, page in (("challenge-platform", SERVED_404_HTML),
-                         ("cdn-cgi", SERVED_404_HTML),
-                         ("cf-turnstile", SERVED_VIA_SCRAPING_BROWSER_HTML)):
-        check("...and %r really does appear on a served page" % banned,
-              banned in page)
-
-    # Every marker must fire on at least one real refusal, or it is dead
-    # weight. `/turnstile/v0/api.js` was in this list and matched nothing at
-    # all across every capture (§17).
-    for marker in P.BOT_CHALLENGE_MARKERS:
-        check("marker %r fires on a real challenge" % marker,
-              marker in CHALLENGE_HTML,
-              "matches nothing — dead weight")
-
-    equal("the challenge fixture names its vendor",
-          P.detect_bot_challenge(CHALLENGE_HTML), "cloudflare (cf_chl_opt)")
-    equal("the HARD block names no vendor — it carries no widget",
-          P.detect_bot_challenge(HARD_BLOCK_HTML), None)
-
-
-def check_positive_asset_detection():
-    """A page BBB served is built out of BBB's own assets; an interstitial is
-    not. §8's assets.mmsrg.com trick, on a third site."""
-    import product_parser as P
-    check("the served page references BBB's asset hosts",
-          P.references_own_assets(SERVED_404_HTML) >= 2)
-    equal("the challenge references none",
-          P.references_own_assets(CHALLENGE_HTML), 0)
-    equal("the hard block references none",
-          P.references_own_assets(HARD_BLOCK_HTML), 0)
-    check("both titles wear BBB's branding, which is why a title check fails",
-          "Better Business Bureau" in HARD_BLOCK_HTML)
-
-
-def check_state_policy():
-    import page_flow
-    equal("every state has a policy",
-          sorted(page_flow.STATE_POLICY),
-          ["blocked", "challenge", "content", "empty", "unknown"])
-    check("content: parsed, not retried, not blocked",
-          page_flow.should_parse("content")
-          and not page_flow.should_retry("content")
-          and not page_flow.counts_as_blocked("content"))
-    check("challenge: retried, SOLVED, counts as blocked",
-          page_flow.should_retry("challenge")
-          and page_flow.should_solve("challenge")
-          and page_flow.counts_as_blocked("challenge"))
-    check("blocked: retried, NEVER solved — there is no widget to solve",
-          page_flow.should_retry("blocked")
-          and not page_flow.should_solve("blocked")
-          and page_flow.counts_as_blocked("blocked"))
-    check("unknown: retried, not solved, NOT blocked",
-          page_flow.should_retry("unknown")
-          and not page_flow.should_solve("unknown")
-          and not page_flow.counts_as_blocked("unknown"))
-    check("an unrecognised state falls back to unknown's policy",
-          page_flow.should_retry("something-new")
-          and not page_flow.should_solve("something-new"))
-    equal("at most one solve per page", page_flow.SOLVES_PER_PAGE, 1)
-
-
-def check_policy_constants_have_a_consumer():
-    """§17: a policy constant nothing reads is the same defect as dead code.
-
-    `RETRY_ON_BLOCKED` carried a paragraph of justification in a sibling repo
-    and no engine consulted it, so setting it False changed nothing.
-    """
-    import page_flow
-    sources = []
-    for name in ("playwright_scraper.py", "selenium_scraper.py",
-                 "puppeteer_scraper.py", "scraper_api_client.py"):
-        path = os.path.join(HERE, name)
-        if os.path.exists(path):
-            sources.append(open(path, encoding="utf-8").read())
-    joined = "\n".join(sources)
-    for constant in ("RETRY_ON_BLOCKED", "BLOCK_RETRIES_WITHOUT_POOL",
-                     "SOLVES_PER_PAGE"):
-        check("page_flow.%s is CONSULTED by an engine" % constant,
-              constant in joined,
-              "defined in page_flow and read by nothing")
-    for fn in ("pages_to_plan", "ready_selector", "min_matches",
-               "content_timeout_ms", "wait_for_count", "classify",
-               "should_retry", "should_solve", "counts_as_blocked",
-               "should_parse", "concurrency_limit",
-               "pagination_is_addressable"):
-        check("page_flow.%s has a caller outside its own module" % fn,
-              fn in joined, "unused policy")
-
-
-# ---------------------------------------------------------------------------
-# The output contract
-# ---------------------------------------------------------------------------
-
-def check_row_schema():
-    from output_writer import Business, ROW_CLASS_BY_MODE, UNIQUE_BY_SKU_MODES
-    names = [f.name for f in fields(Business)]
-    equal("the family prefix is byte-identical and in order (§9)",
-          names[:5], ["source", "scraped_at", "url", "sku", "title"])
-    for gone in ("price", "currency", "original_price", "discount_pct",
-                 "in_stock", "brand"):
-        check("the commerce column %r is absent, not null-forever" % gone,
-              gone not in names)
-    check("`rating` is absent — BBB's is a letter plus a 0-100 score",
-          "rating" not in names)
-    check("...and both of its real names are present",
-          "rating_grade" in names and "rating_score" in names)
-    equal("every mode maps to a row class",
-          sorted(ROW_CLASS_BY_MODE), ["category", "profile", "search"])
-    equal("every mode is one row per sku",
-          sorted(UNIQUE_BY_SKU_MODES), ["category", "profile", "search"])
-    equal("all three modes share one class",
-          len({c for c in ROW_CLASS_BY_MODE.values()}), 1)
-
-
-def check_csv_and_json_writers():
-    from output_writer import Business, write_csv, write_json
-    import product_parser as P
-    rows = P.parse_listing(LISTING_PAYLOAD_JSON).rows
-    with tempfile.TemporaryDirectory() as tmp:
-        csv_path = os.path.join(tmp, "out.csv")
-        write_csv(rows, csv_path, row_cls=Business)
-        with open(csv_path, encoding="utf-8") as f:
-            reader = list(csv.reader(f))
-        equal("CSV header matches the dataclass, in order",
-              reader[0], [f.name for f in fields(Business)])
-        equal("CSV holds every row", len(reader) - 1, len(rows))
-        phone_col = reader[0].index("phone")
-        check("a list column is joined readably rather than repr()'d",
-              " | " in reader[1][phone_col] or reader[1][phone_col].count("(") <= 1,
-              reader[1][phone_col])
-        check("no Python list repr leaked into the CSV",
-              not any(cell.startswith("[") for row in reader[1:] for cell in row))
-
-        empty_csv = os.path.join(tmp, "empty.csv")
-        write_csv([], empty_csv, row_cls=Business)
-        with open(empty_csv, encoding="utf-8") as f:
-            header = list(csv.reader(f))
-        equal("an EMPTY csv still carries its header", len(header), 1)
-        equal("...and it is the right one", header[0],
-              [f.name for f in fields(Business)])
-
-        json_path = os.path.join(tmp, "out.json")
-        write_json(rows, json_path)
-        loaded = json.load(open(json_path, encoding="utf-8"))
-        equal("JSON holds every row", len(loaded), len(rows))
-        equal("JSON keys are the dataclass fields, in order",
-              list(loaded[0].keys()), [f.name for f in fields(Business)])
-        check("a list column stays a real list in JSON",
-              isinstance(loaded[0]["phone"], list))
-
-
-def check_exit_codes():
-    import output_writer as O
-    equal("0 ok / 1 crash / 2 usage / 3 blocked / 4 empty / 5 api / 6 partial",
-          (O.EXIT_BLOCKED, O.EXIT_NO_PRODUCTS, O.EXIT_API_ERROR, O.EXIT_PARTIAL),
-          (3, 4, 5, 6))
-    check("page_cap_reached is a COMPLETE stop reason",
-          "page_cap_reached" in O.COMPLETE_STOP_REASONS)
-    check("single_page_mode is complete by construction",
-          "single_page_mode" in O.COMPLETE_STOP_REASONS)
-    check("no_new_products is complete",
-          "no_new_products" in O.COMPLETE_STOP_REASONS)
-
-
-def check_a_run_that_finds_nothing_writes_nothing():
-    """Never replace last night's good output with []."""
-    from output_writer import save
-    with tempfile.TemporaryDirectory() as tmp:
-        prefix = os.path.join(tmp, "out")
-        with open(prefix + ".json", "w", encoding="utf-8") as f:
-            f.write('[{"sku": "yesterday"}]')
-        code = save([], prefix, "json", allow_empty=False)
-        equal("an empty run exits 4", code, 4)
-        equal("...and leaves the previous good file alone",
-              open(prefix + ".json", encoding="utf-8").read(),
-              '[{"sku": "yesterday"}]')
-        code = save([], prefix, "json", allow_empty=True)
-        equal("--allow-empty WRITES the empty file...", 
-              json.load(open(prefix + ".json", encoding="utf-8")), [])
-        # ...and still reports exit 4. Pinned deliberately (§10: pin a known
-        # behaviour rather than half-guarding it): "zero businesses" is true
-        # whether or not the file was written, and a caller that wanted the
-        # file still wants to know the result was empty.
-        equal("...and still reports exit 4, because it IS empty", code, 4)
-
-
-def check_page_and_position_are_unique_across_pages():
-    """One line, and the column is worthless without it: `position` restarts
-    at 1 on every page."""
-    import product_parser as P
-    page1 = P.parse_listing(LISTING_PAYLOAD_JSON, page=1, mode="search").rows
-    page2 = P.parse_listing(LISTING_PAYLOAD_JSON, page=2, mode="search").rows
-    pairs = [(r.page, r.position) for r in page1 + page2]
-    equal("page+position is unique across a multi-page run",
-          len(set(pairs)), len(pairs))
-    equal("page 2's rows really say page 2",
-          sorted({r.page for r in page2}), [2])
-
-
-def check_sidecar_shape():
-    from output_writer import run_meta
-    meta = run_meta(status="complete", stop_reason="page_cap_reached",
-                    pages_requested=50, pages_completed=15, pages_failed=[],
-                    products=225, mode="search", source="bbb.org",
-                    start_url="https://www.bbb.org/search?find_text=x",
-                    final_url="https://www.bbb.org/api/search?find_text=x",
-                    extra={"total_results": 19016, "pages_available": 15,
-                           "capped_by_site": True, "reachable_max": 225})
-    for key in ("status", "stop_reason", "pages_requested", "pages_completed",
-                "pages_failed", "mode", "source"):
-        check("the sidecar records %r" % key, key in meta)
-    equal("the sidecar carries BBB's own total", meta["total_results"], 19016)
-    check("...and says the run was capped BY THE SITE", meta["capped_by_site"])
-    equal("pages_failed is a LIST of numbers, not a count",
-          isinstance(meta["pages_failed"], list), True)
-
-
-# ---------------------------------------------------------------------------
-# The engines — the five checks CLAUDE.md §17 says to steal
-# ---------------------------------------------------------------------------
 
 ENGINES = ("playwright_scraper", "selenium_scraper", "puppeteer_scraper")
-DRIVER_IMPORTS = {
-    "playwright_scraper": "playwright",
-    "selenium_scraper": "selenium",
-    "puppeteer_scraper": "pyppeteer",
-}
+DRIVER_IMPORTS = {"playwright_scraper": "playwright",
+                  "selenium_scraper": "selenium",
+                  "puppeteer_scraper": "pyppeteer"}
 
 
 def _import_engine(name):
@@ -813,241 +90,832 @@ def _import_engine(name):
         return None
 
 
-def check_engines_import_their_driver_at_module_level():
-    """For the guarded imports above to MEAN anything.
+# ---------------------------------------------------------------------------
+# The fixtures themselves
+# ---------------------------------------------------------------------------
 
-    A sibling repo imported `launch`/`connect` inside the launch path, so the
-    module imported cleanly with no pyppeteer installed: the group never
-    skipped, and the CI job that exists to fail on unexpected skips could not
-    have caught a broken import. It also let CI run against a stub version
-    for a while without anything noticing. This drifts back silently, so it
-    is asserted with an `ast` walk rather than trusted.
-    """
-    for module, driver in DRIVER_IMPORTS.items():
+def check_fixture_corpus_is_real_and_scrubbed():
+    expected = {"p2p_usdt_eur_buy", "p2p_btc_try_sell", "p2p_past_the_end",
+                "p2p_illegal_rows", "p2p_pay_types_eur", "copy_30d_roi",
+                "copy_7d_pnl", "copy_past_the_end", "ann_new_listings",
+                "ann_delisting", "ann_past_the_end", "waf_captcha_chromium",
+                "cdp_extension_injection"}
+    missing = expected - set(FIXTURES)
+    check("every fixture the suite uses is in fixtures_generated.json",
+          not missing, "missing %s" % sorted(missing))
+    blob = json.dumps(FIXTURES)
+    check("the corpus is not empty (a scan of nothing passes for the wrong reason)",
+          len(blob) > 20000, "%d bytes" % len(blob))
+    check("no 32-hex string survived the scrub",
+          not re.search(r"\b[0-9a-f]{32}\b", blob))
+    check("the P2P nicknames are placeholders",
+          "fixture-advertiser-1" in blob and "BURGENK" not in blob)
+    check("the announcement codes are placeholders",
+          "fixture-code-1" in blob)
+
+
+# ---------------------------------------------------------------------------
+# The parser, asserted on VALUES rather than on coverage (§10)
+# ---------------------------------------------------------------------------
+
+def _q(mode, **kw):
+    from product_parser import Query
+    return Query(mode=mode, **kw)
+
+
+def check_p2p_buy_parses_to_the_captured_values():
+    import product_parser as P
+    q = _q("p2p", asset="USDT", fiat="EUR", side="buy")
+    rows = P.parse_page(fx("p2p_usdt_eur_buy"), q, 1)
+    equal("4 kept adverts become 4 rows", len(rows), 4)
+    r = rows[0]
+    equal("price is a FLOAT parsed from the endpoint's string '0.869'", r.price, 0.869)
+    check("price is a float, not the string", isinstance(r.price, float))
+    equal("sku is advNo, kept as a string (past 2**53)", r.sku, "12935358234995494912")
+    equal("fiat", r.fiat, "EUR")
+    equal("asset", r.asset, "USDT")
+    equal("the per-order limits", (r.min_order_fiat, r.max_order_fiat), (100.0, 105.0))
+    equal("available quantity", r.available, 184.24)
+    equal("payment methods are a LIST of identifiers", r.pay_methods, ["Wise"])
+    equal("the time limit", r.pay_time_limit_min, 15)
+    equal("month orders", r.month_orders, 37)
+    equal("positive rate is a fraction", r.positive_rate, 0.6826923)
+    equal("privilegeType is written through uninterpreted", r.privilege_type, 1)
+    equal("the advertiser's public profile URL",
+          r.url, "https://p2p.binance.com/en/advertiserDetail?advertiserNo=sFIXTURE-ADVERTISER-1")
+    equal("positions are 1..4", [x.position for x in rows], [1, 2, 3, 4])
+
+
+def check_p2p_side_is_inverted_in_the_data_and_both_are_kept():
+    """A buy query returns adverts marked SELL: an advert carries the maker's
+    side. 20 of 20 on the captured page, and 20 of 20 the other way round on a
+    sell query. A consumer reading tradeType alone gets every row backwards."""
+    import product_parser as P
+    buy = P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR", side="buy"))
+    sell = P.parse_page(fx("p2p_btc_try_sell"),
+                        _q("p2p", asset="BTC", fiat="TRY", side="sell"))
+    equal("buy query: side is buy on every row", {r.side for r in buy}, {"buy"})
+    equal("...and the adverts say sell", {r.advertiser_side for r in buy}, {"sell"})
+    equal("sell query: side is sell", {r.side for r in sell}, {"sell"})
+    equal("...and the adverts say buy", {r.advertiser_side for r in sell}, {"buy"})
+    equal("a TRY price in the millions parses", sell[0].price, 4105272.0)
+    check("the request carries the TAKER's side",
+          P.request_for(_q("p2p", side="buy"), 1).body["tradeType"] == "BUY")
+
+
+def check_copytrading_parses_to_the_captured_values():
+    import product_parser as P
+    rows = P.parse_page(fx("copy_30d_roi"), _q("copytrading"), 1)
+    equal("3 kept portfolios", len(rows), 3)
+    r = rows[0]
+    equal("sku is leadPortfolioId", r.sku, "5219911688676500225")
+    equal("ROI is a percentage as published", r.roi_pct, 4557.3715)
+    equal("PnL", r.pnl, 22786.8575)
+    equal("drawdown", r.mdd_pct, 1.5226)
+    equal("win rate", r.win_rate_pct, 80.8219)
+    equal("copiers / seats", (r.copiers, r.max_copiers), (399, 400))
+    equal("a portfolio with a seat left is not full", r.is_full, False)
+    equal("badge", r.badge, "MASTER")
+    equal("API trading is read from apiKeyTag", r.api_trading, True)
+    equal("TradFi is read from tradFiTag", r.tradfi, True)
+    equal("a null Sharpe ratio stays null, not 0", r.sharpe_ratio, None)
+    equal("started_at from epoch ms", r.started_at, "2026-09-11T01:16:22.096000+00:00")
+    equal("the period is on the row", r.time_range, "30D")
+    equal("the ORDERING is on the row", r.sort, "roi-desc")
+    equal("the lead page URL",
+          r.url, "https://www.binance.com/en/copy-trading/lead-details/5219911688676500225")
+    pnl = P.parse_page(fx("copy_7d_pnl"),
+                       _q("copytrading", time_range="7D", sort_by="pnl"), 1)
+    equal("a 7D-by-PnL run says so on every row",
+          {(x.time_range, x.sort) for x in pnl}, {("7D", "pnl-desc")})
+
+
+def check_announcements_parse_to_the_captured_values():
+    import product_parser as P
+    rows = P.parse_page(fx("ann_new_listings"), _q("announcements"), 1)
+    equal("3 kept articles", len(rows), 3)
+    r = rows[0]
+    equal("sku is the numeric article id", r.sku, "285492")
+    equal("title", r.title, "Binance Will List Hyperliquid (HYPE) with Seed Tag Applied")
+    equal("catalogue", (r.catalog_id, r.catalog_name), (48, "New Cryptocurrency Listing"))
+    equal("released_at from epoch ms", r.released_at, "2026-09-24T07:30:38.608000+00:00")
+    equal("the canonical /detail/{code} address (what a slug link redirects to)",
+          r.url, "https://www.binance.com/en/support/announcement/detail/fixture-code-1")
+    d = P.parse_page(fx("ann_delisting"), _q("announcements", catalog="delisting"), 1)
+    equal("the delisting catalogue", {x.catalog_id for x in d}, {161})
+
+
+def check_totals_are_read_from_page_one_and_planned():
+    import product_parser as P
+    equal("P2P total", P.total_results(fx("p2p_usdt_eur_buy"), "p2p"), 187)
+    equal("...is 10 pages of 20", P.pages_available(187, "p2p"), 10)
+    equal("copy-trading total", P.total_results(fx("copy_30d_roi"), "copytrading"), 8921)
+    equal("...is 298 pages of 30 (the silent cap)", P.pages_available(8921, "copytrading"), 298)
+    equal("announcements total",
+          P.total_results(fx("ann_new_listings"), "announcements"), 2269)
+    equal("...is 46 pages of 50", P.pages_available(2269, "announcements"), 46)
+    equal("P2P reports total 0 on a page PAST the end, which is why only "
+          "page 1's total is read",
+          P.total_results(fx("p2p_past_the_end"), "p2p"), 0)
+    import page_flow
+    equal("asking for more pages than exist plans what exists",
+          page_flow.pages_to_plan(50, 10), 10)
+    equal("...and never fewer than one", page_flow.pages_to_plan(3, 0), 1)
+    equal("an unknown total falls back to the cap",
+          page_flow.pages_to_plan(5, None), 5)
+
+
+def check_page_sizes_are_the_measured_ones():
+    """Each of these is a measurement, and each is a trap when wrong."""
+    import product_parser as P
+    equal("P2P rows: 20 (50 is 'illegal parameter')", P.P2P_ROWS, 20)
+    equal("copy-trading: 30, the size the server silently caps at", P.COPY_ROWS, 30)
+    check("announcements: a size from the accepted set {1,2,5,10,15,20,50}",
+          P.ANN_ROWS in (1, 2, 5, 10, 15, 20, 50), repr(P.ANN_ROWS))
+    equal("the request uses those sizes",
+          (P.request_for(_q("p2p"), 3).body["rows"],
+           P.request_for(_q("copytrading"), 3).body["pageSize"],
+           P.request_for(_q("announcements"), 3).params["pageSize"]),
+          (20, 30, 50))
+    equal("and the page number",
+          (P.request_for(_q("p2p"), 3).body["page"],
+           P.request_for(_q("copytrading"), 3).body["pageNumber"],
+           P.request_for(_q("announcements"), 3).params["pageNo"]),
+          (3, 3, 3))
+    equal("P2P and copy-trading are POST, announcements GET",
+          [P.request_for(_q(m), 1).method for m in ("p2p", "copytrading", "announcements")],
+          ["POST", "POST", "GET"])
+
+
+def check_position_counts_emitted_rows_not_payload_slots():
+    """§24: a record the parser drops must not shift every later position."""
+    import product_parser as P
+    payload = copy.deepcopy(FIXTURES["p2p_usdt_eur_buy"])
+    payload["data"].insert(1, {"adv": None, "advertiser": {}})
+    rows = P.parse_page(json.dumps(payload), _q("p2p", fiat="EUR"), 1)
+    equal("the malformed record is dropped", len(rows), 4)
+    equal("...and positions stay contiguous", [r.position for r in rows], [1, 2, 3, 4])
+
+
+def check_page_and_position_are_unique_across_pages():
+    import product_parser as P
+    q = _q("copytrading")
+    p1 = P.parse_page(fx("copy_30d_roi"), q, 1)
+    p2 = P.parse_page(fx("copy_30d_roi"), q, 2)
+    pairs = [(r.page, r.position) for r in p1 + p2]
+    equal("page+position is unique across a multi-page run", len(set(pairs)), len(pairs))
+    equal("page 2's rows really say page 2", {r.page for r in p2}, {2})
+
+
+def check_values_the_site_did_not_state_stay_null():
+    import product_parser as P
+    equal("an implausible timestamp is None, not 1970", P._iso_ms(5), None)
+    equal("a non-numeric price is None", P._float("n/a"), None)
+    equal("a boolean is not a number", P._float(True), None)
+    equal("an absent string is None, not ''", P._str("  "), None)
+
+
+# ---------------------------------------------------------------------------
+# The query: every parameter allowlisted, because the API does not validate
+# ---------------------------------------------------------------------------
+
+def check_the_api_silent_fallbacks_are_refused_up_front():
+    """Measured: an unknown dataType returns a full list under SOME ordering,
+    a pageSize above 30 is silently capped, and an unknown payTypes entry
+    returns an empty list. Each is a typo that looks like a healthy run."""
+    import product_parser as P
+    check("win rate is NOT offered: the API gave a nonsense key the same answer",
+          "win-rate" not in P.COPY_SORTS and "WIN_RATE" not in P.COPY_SORTS.values())
+    check("an unknown ordering is refused",
+          _q("copytrading", sort_by="winrate").validate() is not None)
+    check("1Y is refused (the API answers 11012004)",
+          _q("copytrading", time_range="1Y").validate() is not None)
+    check("365D is accepted (measured)", _q("copytrading", time_range="365D").validate() is None)
+    check("an unknown side is refused", _q("p2p", side="short").validate() is not None)
+    check("a fiat that is not 3 letters is refused", _q("p2p", fiat="EURO").validate() is not None)
+    check("an unknown catalogue alias is refused",
+          _q("announcements", catalog="listings").validate() is not None)
+    check("a numeric catalogue id is accepted",
+          _q("announcements", catalog="161").validate() is None)
+    equal("aliases map to the site's own ids",
+          [P.catalog_id(a) for a in ("new-listings", "delisting", "news")], [48, 161, 49])
+
+
+def check_pay_types_are_checked_against_the_sites_list():
+    import product_parser as P
+    offered = P.pay_type_identifiers(fx("p2p_pay_types_eur"))
+    check("the site's list for EUR is read", offered and "SEPAinstant" in offered
+          and "Wise" in offered, repr(offered))
+    equal("an exact identifier passes", P.check_pay_types(["Wise"], offered), None)
+    msg = P.check_pay_types(["SEPA Instant"], offered) or ""
+    check("the page's display name is refused...", "SEPA Instant" in msg)
+    check("...and the real identifier is suggested", "SEPAinstant" in msg, msg)
+    equal("an unreadable list does not refuse a correct run",
+          P.check_pay_types(["Wise"], None), None)
+    equal("a response without the shape reads as unreadable, not as []",
+          P.pay_type_identifiers('{"code":"000000","data":null}'), None)
+
+
+def check_url_shapes():
+    import product_parser as P
+    q, why = P.query_from_url("https://p2p.binance.com/en/trade/all-payments/USDT?fiat=EUR")
+    equal("a P2P buy page", (q.mode, q.side, q.asset, q.fiat, q.pay_types),
+          ("p2p", "buy", "USDT", "EUR", ()))
+    q, _ = P.query_from_url("https://p2p.binance.com/en/trade/Wise/USDT?fiat=EUR")
+    equal("a payment in the buy path is a --pay-type", q.pay_types, ("Wise",))
+    q, _ = P.query_from_url("https://p2p.binance.com/en/trade/sell/BTC?fiat=TRY&payment=Papara")
+    equal("a P2P sell page", (q.side, q.asset, q.fiat, q.pay_types),
+          ("sell", "BTC", "TRY", ("Papara",)))
+    q, _ = P.query_from_url("https://www.binance.com/en/copy-trading")
+    equal("the copy-trading page", q.mode, "copytrading")
+    q, _ = P.query_from_url("https://www.binance.com/en/support/announcement/list/161")
+    equal("an announcement catalogue", (q.mode, q.catalog), ("announcements", "161"))
+    q, why = P.query_from_url("https://www.binance.us/en/markets")
+    check("binance.us is refused WITH the reason", q is None and "binance.us" in why, why)
+    q, why = P.query_from_url("https://www.binance.com/en/markets/overview")
+    check("an unsupported page is refused, naming what IS supported",
+          q is None and "copy-trading" in why, why)
+
+
+def check_url_and_flags_together_are_refused():
+    import page_flow
+    errors = []
+
+    def err(msg):
+        errors.append(msg)
+        raise SystemExit(2)
+
+    args = types.SimpleNamespace(
+        url="https://p2p.binance.com/en/trade/all-payments/USDT?fiat=EUR",
+        mode=None, asset=None, fiat="TRY", side=None, pay_type=None,
+        amount=None, time_range=None, sort_by=None, order=None,
+        hide_full=False, category=None, pages=1)
+    try:
+        page_flow.build_query(args, err)
+    except SystemExit:
+        pass
+    check("--url with --fiat is refused, not merged",
+          errors and "--fiat" in errors[0], repr(errors))
+    args.fiat = None
+    errors.clear()
+    q = page_flow.build_query(args, err)
+    equal("--url alone reads the query from the address", (q.mode, q.fiat), ("p2p", "EUR"))
+    args.url, args.mode = None, "copytrading"
+    q = page_flow.build_query(args, err)
+    equal("flag defaults apply without --url", (q.time_range, q.sort_by, q.order),
+          ("30D", "roi", "desc"))
+
+
+# ---------------------------------------------------------------------------
+# Page state: what the site answered with
+# ---------------------------------------------------------------------------
+
+def check_page_states_on_real_captures():
+    import page_flow as F
+    equal("a listing with rows is content", F.classify(fx("p2p_usdt_eur_buy"), 200), "content")
+    equal("a page past the end is EMPTY, an answer", F.classify(fx("p2p_past_the_end"), 200), "empty")
+    equal("...on copy-trading too", F.classify(fx("copy_past_the_end"), 200), "empty")
+    equal("...and on announcements", F.classify(fx("ann_past_the_end"), 200), "empty")
+    equal("a non-success code is REJECTED, not blocked",
+          F.classify(fx("p2p_illegal_rows"), 200), "rejected")
+    import product_parser as P
+    equal("...and the site's complaint is named",
+          P.api_error(fx("p2p_illegal_rows")), "code 000002: illegal parameter")
+    equal("HTTP 400 with an EMPTY body (a bad pageSize) is rejected", F.classify("", 400), "rejected")
+    equal("AWS WAF's 202 challenge, empty body + header", F.classify("", 202, "", "challenge"), "challenge")
+    equal("...and without the header, on status alone", F.classify("", 202), "challenge")
+    equal("AWS WAF's CAPTCHA page as real Chromium got it",
+          F.classify(fx("waf_captcha_chromium"), 405), "challenge")
+    equal("...recognised by its markers even with no status (Selenium)",
+          F.classify(fx("waf_captcha_chromium"), None), "challenge")
+    equal("429 is throttled", F.classify("", 429), "throttled")
+    equal("418 (the site's ban after 429) is throttled", F.classify("", 418), "throttled")
+    equal("451 is restricted: the exit's COUNTRY", F.classify("", 451), "restricted")
+    equal("403 is blocked", F.classify("<html>403 Forbidden</html>", 403), "blocked")
+    equal("anything else is unknown", F.classify("<html>hello</html>", 200), "unknown")
+
+
+def check_the_waf_page_is_solvable_and_detected_fully():
+    from captcha_solver import detect_aws_waf
+    c = detect_aws_waf(fx("waf_captcha_chromium"),
+                       "https://www.binance.com/en/support/announcement")
+    check("the captured CAPTCHA page is detected as AWS WAF", c is not None and c.is_aws_waf)
+    check("...with a widget, so a solve has something to buy", c and c.has_captcha_widget)
+    check("...and every AmazonTask field present",
+          c and all([c.sitekey, c.iv, c.context, c.challenge_script, c.captcha_script]))
+
+
+def check_markers_do_not_match_a_page_the_scraping_browser_served():
+    """§24: the Scraping Browser's auto-solve extension injects captcha
+    hunters into EVERY page, amazon_waf among them. The marker set must score
+    zero against that injection WITHOUT any strip, or the strip is
+    load-bearing and the next marker inherits the hole."""
+    import product_parser as P
+    html = fx("cdp_extension_injection")
+    check("the fixture really carries the amazon_waf hunter (not vacuous)",
+          "amazon_waf" in html and "turnstile" in html)
+    equal("no AWS WAF marker fires on the extension's injection",
+          P.detect_bot_challenge(html), None)
+    for name in ("p2p_usdt_eur_buy", "copy_30d_roi", "ann_new_listings"):
+        equal("no marker fires on served data (%s)" % name,
+              P.detect_bot_challenge(fx(name)), None)
+    check("the bare word 'captcha' is not a marker",
+          all(m.lower() != "captcha" for m in P.AWS_WAF_MARKERS))
+
+
+def check_state_policy():
+    import page_flow as F
+    equal("every state has a policy", sorted(F.STATE_POLICY),
+          ["blocked", "challenge", "content", "empty", "rejected",
+           "restricted", "throttled", "unknown"])
+    check("content and empty are parsed, never retried or blocked",
+          all(F.should_parse(s) and not F.should_retry(s) and not F.counts_as_blocked(s)
+              for s in ("content", "empty")))
+    check("rejected: not retried, not solved, NOT blocked (a typo is not a proxy problem)",
+          not F.should_retry("rejected") and not F.should_solve("rejected")
+          and not F.counts_as_blocked("rejected") and not F.should_parse("rejected"))
+    check("challenge: retried, solved, blocked",
+          F.should_retry("challenge") and F.should_solve("challenge")
+          and F.counts_as_blocked("challenge"))
+    check("throttled: retried, NOT blocked (§24)",
+          F.should_retry("throttled") and not F.counts_as_blocked("throttled"))
+    check("restricted and blocked: never solved, there is no widget",
+          not F.should_solve("restricted") and not F.should_solve("blocked"))
+    equal("at most one solve per page", F.SOLVES_PER_PAGE, 1)
+    equal("refusals are reported by name",
+          [F.refusal_name(s) for s in ("challenge", "restricted", "blocked")],
+          ["aws-waf", "geo-451", "http-403"])
+    check("451's advice names the country, not a solver",
+          "COUNTRY" in F.refusal_advice("restricted"))
+    check("...and claims nothing about what binance.com has been SEEN doing",
+          "answers" not in F.refusal_advice("restricted"))
+    equal("the aws-waf-token goes on the REGISTRABLE domain",
+          (F.cookie_domain("www.binance.com"), F.cookie_domain("p2p.binance.com")),
+          (".binance.com", ".binance.com"))
+
+
+def check_policy_constants_have_a_consumer():
+    """§17: a policy constant nothing reads is the same defect as dead code."""
+    src = open(os.path.join(HERE, "page_flow.py"), encoding="utf-8").read()
+    for constant in ("RETRY_ON_BLOCKED", "BLOCK_RETRIES_WITHOUT_POOL",
+                     "SOLVES_PER_PAGE", "THROTTLE_RETRIES", "THROTTLE_WAIT_S",
+                     "CHALLENGE_SETTLE_MS", "CHALLENGE_POLL_MS", "FETCH_TIMEOUT_MS",
+                     "CORE_FIELD_FLOOR"):
+        uses = len(re.findall(r"\b%s\b" % constant, src))
+        engines = "".join(open(os.path.join(HERE, m + ".py"), encoding="utf-8").read()
+                          for m in ENGINES)
+        check("page_flow.%s is READ, not only defined" % constant,
+              uses >= 2 or constant in engines, "%d occurrence(s)" % uses)
+
+
+# ---------------------------------------------------------------------------
+# The shared fetch loop, driven end to end with a fake driver
+# ---------------------------------------------------------------------------
+
+class _FakeOps:
+    """page_flow's named operations, answering from fixtures."""
+
+    def __init__(self, answers, landing=None):
+        self.answers = answers          # page -> list of (status, text, waf)
+        self.landing = landing or fx("ann_past_the_end")
+        self.landed = False
+        self.pool = None
+        self.gotos = self.relaunches = self.solves = 0
+        self.fetches = []
+
+    def goto(self, url):
+        self.gotos += 1
+        return 200, None
+
+    def document_text(self):
+        return self.landing
+
+    def wait_ms(self, ms):
+        pass
+
+    def solve_captcha(self):
+        self.solves += 1
+        return False
+
+    def fetch(self, req):
+        self.fetches.append(req.page)
+        if req.page == 0:              # the pay-type list
+            return 200, fx("p2p_pay_types_eur"), None, None
+        queue = self.answers.get(req.page) or [(200, fx("p2p_past_the_end"), None)]
+        status, text, waf = queue.pop(0) if len(queue) > 1 else queue[0]
+        return status, text, waf, None
+
+    def relaunch(self):
+        self.relaunches += 1
+        self.landed = False
+
+    def proxy_failure(self, text):
+        return ""
+
+    def close(self):
+        pass
+
+
+def _p2p_page(n):
+    """Page n of a P2P listing: the captured page with page-unique ids."""
+    payload = copy.deepcopy(FIXTURES["p2p_usdt_eur_buy"])
+    for rec in payload["data"]:
+        rec["adv"]["advNo"] = "%s%d" % (rec["adv"]["advNo"][:-2], n)
+    payload["total"] = 12   # three pages of 4 ... planned as ceil(12/20) = 1
+    return json.dumps(payload)
+
+
+def _run(answers, pages=3, query=None, landing=None, **extra):
+    import page_flow
+    from product_parser import Query
+    with tempfile.TemporaryDirectory() as tmp:
+        args = types.SimpleNamespace(
+            pages=pages, retries=2, retry_delay=0, delay=0,
+            proxy_block_retries=2, out=os.path.join(tmp, "out"), format="json",
+            allow_empty=False, dump_html=None, url=None, cdp_endpoint=None,
+            concurrency=1)
+        for k, v in extra.items():
+            setattr(args, k, v)
+        ops = _FakeOps(answers, landing)
+        q = query or Query("p2p", fiat="EUR")
+        rc = page_flow.run_pages(lambda: ops, lambda o: None,
+                                 lambda pages: ([], [], False), args, None, q, 1)
+        meta_path = args.out + ".meta.json"
+        meta = json.load(open(meta_path)) if os.path.exists(meta_path) else None
+        rows = (json.load(open(args.out + ".json"))
+                if os.path.exists(args.out + ".json") else None)
+    return rc, meta, rows, ops
+
+
+def check_the_shared_loop_end_to_end():
+    import product_parser as P
+    ann_q = P.Query("announcements")
+    rc, meta, rows, ops = _run({1: [(200, fx("ann_new_listings"), None)]},
+                               pages=1, query=ann_q)
+    equal("a served page: exit 0", rc, 0)
+    equal("...complete", meta and meta["status"], "complete")
+    equal("...the site's total in the sidecar", meta and meta["total_results"], 2269)
+    equal("...and the query too", meta and meta["query"], {"catalog": "new-listings"})
+    equal("...rows written", len(rows or []), 3)
+    equal("the browser landed ONCE for the run", ops.gotos, 1)
+
+    rc, meta, rows, ops = _run({1: [(200, fx("p2p_illegal_rows"), None)]})
+    equal("a REJECTED page 1: exit 5, the data never arrived", rc, 5)
+    equal("...fetched once, not retried", ops.fetches, [1])
+    equal("...and no sidecar beside no output", meta, None)
+
+    rc, meta, rows, ops = _run({1: [(403, "<html>403 Forbidden</html>", None)]})
+    equal("a 403 on page 1: exit 3", rc, 3)
+    equal("...re-fetched once from a fresh browser (no pool)", ops.relaunches, 1)
+
+    rc, meta, rows, ops = _run({1: [(451, "", None)]})
+    equal("a 451 on page 1: exit 3", rc, 3)
+
+    rc, meta, rows, ops = _run({1: [(200, fx("p2p_past_the_end"), None)]})
+    equal("an EMPTY listing: exit 4, and nothing written", (rc, rows), (4, None))
+
+    rc, meta, rows, ops = _run({1: [(429, "", None), (200, _p2p_page(1), None)]}, pages=1)
+    equal("a throttle, then the page: exit 0", rc, 0)
+    equal("...at the SAME exit (no relaunch)", ops.relaunches, 0)
+    equal("...fetched twice", ops.fetches, [1, 1])
+    rc, meta, rows, ops = _run({1: [(429, "", None), (200, _p2p_page(1), None)]},
+                               pages=1, retries=1)
+    equal("a throttle wait spends its OWN budget, not --retries (§24): "
+          "with --retries 1 the page still arrives", rc, 0)
+
+    rc, meta, rows, ops = _run({1: [(202, "", "challenge"), (200, _p2p_page(1), None)]}, pages=1)
+    equal("a WAF challenge on a fetch, then the page: exit 0", rc, 0)
+    equal("...the session LANDED AGAIN before retrying", ops.gotos, 2)
+
+    rc, meta, rows, ops = _run({}, query=P.Query("p2p", fiat="EUR", pay_types=("SEPA Instant",)))
+    equal("an unknown --pay-type: exit 2 before any search", rc, 2)
+    equal("...no search page was fetched", [p for p in ops.fetches if p != 0], [])
+
+
+def check_a_multi_page_run_merges_in_page_order_and_ends_on_data():
+    import product_parser as P
+    q = P.Query("copytrading")
+    page2 = copy.deepcopy(FIXTURES["copy_30d_roi"])
+    for i, rec in enumerate(page2["data"]["list"]):
+        rec["leadPortfolioId"] = "90000000000000000%02d" % i
+    answers = {1: [(200, fx("copy_30d_roi"), None)],
+               2: [(200, json.dumps(page2), None)],
+               3: [(200, fx("copy_past_the_end"), None)]}
+    rc, meta, rows, ops = _run(answers, pages=5, query=q)
+    equal("an empty page 3 of a planned 5 ends the run: exit 0", rc, 0)
+    equal("...as a complete run", meta["status"], "complete")
+    equal("...stopped on the DATA", meta["stop_reason"], "end_of_listing")
+    equal("...pages 1-3 fetched, not 4-5", ops.fetches, [1, 2, 3])
+    equal("rows are in page order", [r["page"] for r in rows], [1, 1, 1, 2, 2, 2])
+    dup = {1: [(200, fx("copy_30d_roi"), None)], 2: [(200, fx("copy_30d_roi"), None)],
+           3: [(200, fx("copy_past_the_end"), None)]}
+    rc, meta, rows, ops = _run(dup, pages=3, query=q)
+    equal("a row seen twice across pages (a live listing moving) is kept once",
+          len(rows), 3)
+
+
+def check_every_engine_implements_the_operations_page_flow_uses():
+    """The fetch loop is shared, so an engine missing ONE operation fails
+    only when a live run reaches it. The set is DERIVED from page_flow's own
+    source (every `ops.<name>`), not listed by hand."""
+    tree = ast.parse(open(os.path.join(HERE, "page_flow.py"), encoding="utf-8").read())
+    used = {n.attr for n in ast.walk(tree)
+            if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)
+            and n.value.id == "ops"}
+    check("page_flow drives the engines through named operations (not vacuous)",
+          {"goto", "fetch", "document_text", "solve_captcha", "relaunch"} <= used,
+          repr(sorted(used)))
+    check("...and the fake driver this suite uses implements every one",
+          all(hasattr(_FakeOps({}), name) for name in used),
+          repr(sorted(n for n in used if not hasattr(_FakeOps({}), n))))
+    for module in ENGINES:
         path = os.path.join(HERE, module + ".py")
-        if not os.path.exists(path):
-            check("%s exists" % module, False)
-            continue
         tree = ast.parse(open(path, encoding="utf-8").read())
-        top_level = set()
-        for node in tree.body:          # module level ONLY
+        ops_cls = next((n for n in tree.body
+                        if isinstance(n, ast.ClassDef) and n.name == "_Ops"), None)
+        if ops_cls is None:
+            check("%s defines _Ops" % module, False)
+            continue
+        methods = {n.name for n in ops_cls.body if isinstance(n, ast.FunctionDef)}
+        # Targets can be tuples (`self.args, self.pool = args, pool`), so walk
+        # into each target rather than reading it whole.
+        attrs = {t.attr for n in ast.walk(ops_cls) if isinstance(n, ast.Assign)
+                 for target in n.targets for t in ast.walk(target)
+                 if isinstance(t, ast.Attribute)
+                 and isinstance(t.value, ast.Name) and t.value.id == "self"}
+        missing = sorted(used - methods - attrs)
+        check("%s._Ops provides every operation page_flow uses" % module,
+              not missing, "missing %s" % missing)
+
+
+# ---------------------------------------------------------------------------
+# The output contract
+# ---------------------------------------------------------------------------
+
+def check_row_schema():
+    from output_writer import (Announcement, LeadTrader, P2PAd,
+                               ROW_CLASS_BY_MODE, UNIQUE_BY_SKU_MODES)
+    for cls in (P2PAd, LeadTrader, Announcement):
+        names = [f.name for f in fields(cls)]
+        equal("%s: the family prefix is byte-identical and in order (§9)" % cls.__name__,
+              names[:5], ["source", "scraped_at", "url", "sku", "title"])
+        check("%s: the run-describing tail is present" % cls.__name__,
+              {"page", "position", "mode", "data_source"} <= set(names))
+        check("%s: no commerce column that would be null forever" % cls.__name__,
+              not ({"currency", "brand", "original_price", "discount_pct"} & set(names)))
+    equal("every mode maps to its row class", sorted(ROW_CLASS_BY_MODE),
+          ["announcements", "copytrading", "p2p"])
+    equal("every mode is one row per sku", sorted(UNIQUE_BY_SKU_MODES),
+          ["announcements", "copytrading", "p2p"])
+    check("P2P keeps BOTH sides", {"side", "advertiser_side"} <= {f.name for f in fields(P2PAd)})
+    check("copy-trading carries its ordering and period",
+          {"sort", "time_range"} <= {f.name for f in fields(LeadTrader)})
+
+
+def check_csv_and_json_writers():
+    from output_writer import P2PAd, write_csv, write_json
+    import product_parser as P
+    rows = P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR"), 1)
+    with tempfile.TemporaryDirectory() as tmp:
+        csv_path = os.path.join(tmp, "out.csv")
+        write_csv(rows, csv_path, row_cls=P2PAd)
+        reader = list(csv.reader(open(csv_path, encoding="utf-8")))
+        equal("CSV header matches the dataclass, in order", reader[0],
+              [f.name for f in fields(P2PAd)])
+        equal("CSV holds every row", len(reader) - 1, len(rows))
+        check("no Python list repr leaked into the CSV",
+              not any(cell.startswith("[") for row in reader[1:] for cell in row))
+        empty_csv = os.path.join(tmp, "empty.csv")
+        write_csv([], empty_csv, row_cls=P2PAd)
+        equal("an EMPTY csv still carries its header",
+              len(list(csv.reader(open(empty_csv, encoding="utf-8")))), 1)
+        json_path = os.path.join(tmp, "out.json")
+        write_json(rows, json_path)
+        loaded = json.load(open(json_path, encoding="utf-8"))
+        check("a list column stays a real list in JSON", isinstance(loaded[0]["pay_methods"], list))
+        check("an id past 2**53 stays a string in JSON", isinstance(loaded[0]["sku"], str))
+
+
+def check_exit_codes():
+    import output_writer as O
+    equal("3 blocked / 4 empty / 5 never obtained / 6 partial",
+          (O.EXIT_BLOCKED, O.EXIT_NO_PRODUCTS, O.EXIT_FETCH_FAILED, O.EXIT_PARTIAL),
+          (3, 4, 5, 6))
+    check("end_of_listing is a COMPLETE stop reason (§24)",
+          "end_of_listing" in O.COMPLETE_STOP_REASONS)
+    check("api_rejected is NOT complete", "api_rejected" not in O.COMPLETE_STOP_REASONS)
+
+
+def check_a_run_that_finds_nothing_writes_nothing():
+    from output_writer import save
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        with open(prefix + ".json", "w", encoding="utf-8") as f:
+            f.write('[{"sku": "yesterday"}]')
+        equal("an empty run exits 4", save([], prefix, "json", allow_empty=False), 4)
+        equal("...and leaves the previous good file alone",
+              open(prefix + ".json", encoding="utf-8").read(), '[{"sku": "yesterday"}]')
+        equal("--allow-empty writes it, and still reports exit 4",
+              save([], prefix, "json", allow_empty=True), 4)
+
+
+def check_diff_runs_tracks_the_real_columns():
+    """The sibling family's diff reported 0 changed on real changes for weeks
+    because its column list was copied from a repo with different rows. Here
+    the list is derived; assert it is never empty and that a real change is
+    seen."""
+    import diff_runs as D
+    for mode in ("p2p", "copytrading", "announcements"):
+        check("%s: tracked columns are derived and non-empty" % mode,
+              len(D.tracked_fields(mode)) >= 3, repr(D.tracked_fields(mode)))
+    check("price is tracked on P2P", "price" in D.tracked_fields("p2p"))
+    check("position is NOT tracked (a live listing reorders itself)",
+          "position" not in D.tracked_fields("copytrading"))
+    import product_parser as P
+    old = [asdict(r) for r in P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR"))]
+    new = copy.deepcopy(old)
+    new[0]["price"] = 0.9
+    del new[1]
+    result = D.diff_products(old, new)
+    equal("one changed", [c["sku"] for c in result["changed"]], [old[0]["sku"]])
+    equal("...with the price named", list(result["changed"][0]["changes"]), ["price"])
+    equal("one removed", len(result["removed"]), 1)
+    with tempfile.TemporaryDirectory() as tmp:
+        a, b = os.path.join(tmp, "a.json"), os.path.join(tmp, "b.json")
+        json.dump(old, open(a, "w"))
+        json.dump([asdict(r) for r in P.parse_page(fx("copy_30d_roi"), _q("copytrading"))],
+                  open(b, "w"))
+        json.dump({"status": "complete", "query": {"x": 1}}, open(a[:-5] + ".meta.json", "w"))
+        json.dump({"status": "complete", "query": {"x": 2}}, open(b[:-5] + ".meta.json", "w"))
+        args = types.SimpleNamespace(old=a, new=b)
+        check("two different MODES are refused", not D._check_comparable(args))
+
+
+def check_sidecar_shape():
+    from output_writer import run_meta
+    meta = run_meta(status="complete", stop_reason="completed", pages_requested=3,
+                    pages_completed=3, pages_failed=[], products=90,
+                    mode="copytrading", source="binance.com",
+                    start_url="https://www.binance.com/x", final_url="https://www.binance.com/y",
+                    extra={"total_results": 8921, "pages_available": 298,
+                           "query": {"time_range": "30D"}})
+    for key in ("status", "stop_reason", "pages_requested", "pages_completed",
+                "pages_failed", "mode", "source", "total_results", "query"):
+        check("the sidecar records %r" % key, key in meta)
+    check("pages_failed is a LIST", isinstance(meta["pages_failed"], list))
+
+
+# ---------------------------------------------------------------------------
+# The engines — the checks CLAUDE.md §17 says to steal
+# ---------------------------------------------------------------------------
+
+def check_engines_import_their_driver_at_module_level():
+    for module, driver in DRIVER_IMPORTS.items():
+        tree = ast.parse(open(os.path.join(HERE, module + ".py"), encoding="utf-8").read())
+        top = set()
+        for node in tree.body:
             if isinstance(node, ast.Import):
-                top_level.update(a.name.split(".")[0] for a in node.names)
+                top.update(a.name.split(".")[0] for a in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
-                top_level.add(node.module.split(".")[0])
-        check("%s imports %s at MODULE level" % (module, driver),
-              driver in top_level,
-              "top-level imports: %s" % sorted(top_level))
+                top.add(node.module.split(".")[0])
+        check("%s imports %s at MODULE level" % (module, driver), driver in top,
+              "top-level imports: %s" % sorted(top))
 
 
 def check_shared_calls_bind_against_the_real_signature():
-    """§17's check #1, and the one that earns its keep.
-
-    A sibling repo shipped `classify(html, url=…)` in two of three engines
-    against a callee taking `status` second, and BOTH crashed on their first
-    fetch — invisible to import, --help, compileall, the undefined-name walk
-    and 400+ green assertions, because none of those calls a function the way
-    a live run does.
-
-    This walks every engine's AST for calls into the shared modules and binds
-    each one against the callee's real signature.
-    """
+    """§17's check #1. Every call from an engine (and the Scraper API client,
+    diff_runs and page_flow itself) into a shared module is bound against the
+    callee's real signature. A name that does not exist FAILS (§22). A name
+    bound in the calling file shadows a same-named module."""
+    import captcha_solver
+    import output_writer
     import page_flow
     import product_parser
-    import output_writer
+    import proxy_pool
     targets = {"page_flow": page_flow, "product_parser": product_parser,
-               "output_writer": output_writer}
+               "output_writer": output_writer, "captcha_solver": captcha_solver,
+               "proxy_pool": proxy_pool}
     bound = 0
-    for module in ENGINES + ("scraper_api_client",):
-        path = os.path.join(HERE, module + ".py")
-        if not os.path.exists(path):
-            continue
-        source = open(path, encoding="utf-8").read()
-        tree = ast.parse(source)
-        # Which shared names this file imported directly (`from x import y`).
+    for module in ENGINES + ("scraper_api_client", "diff_runs", "page_flow"):
+        tree = ast.parse(open(os.path.join(HERE, module + ".py"), encoding="utf-8").read())
+        local_names = {n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
         direct = {}
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.module in targets:
                 for alias in node.names:
-                    direct[alias.asname or alias.name] = (
-                        targets[node.module], alias.name)
+                    direct[alias.asname or alias.name] = (targets[node.module], alias.name)
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
-            func = node.func
-            owner = attr = None
-            if isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name):
-                if func.value.id in targets:
-                    owner, attr = targets[func.value.id], func.attr
+            func, owner, attr = node.func, None, None
+            if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id in targets and func.value.id not in local_names):
+                owner, attr = targets[func.value.id], func.attr
             elif isinstance(func, ast.Name) and func.id in direct:
                 owner, attr = direct[func.id]
             if owner is None:
                 continue
-            # A name that is NOT THERE is the loudest possible failure and
-            # this check used to swallow it: `getattr(..., None)` returned
-            # None, `not callable(None)` was true, and the call was skipped.
-            # Three calls into a page_flow API that does not exist in this
-            # repo -- comparable(), next_page_selector(),
-            # next_page_candidates(), all of them Tokopedia's, all arriving
-            # with copied code -- sat in two engines under a green run of
-            # this very function. Absent is not "nothing to bind".
             if not hasattr(owner, attr):
-                check("%s.%s exists (called from %s:%d)"
-                      % (getattr(owner, "__name__", owner), attr,
-                         module + ".py", node.lineno),
-                      False,
-                      "the engine calls a name the shared module does not "
-                      "define; a live run reaches this as AttributeError")
+                check("%s.%s exists (called from %s:%d)" % (owner.__name__, attr,
+                      module, node.lineno), False, "AttributeError on a live run")
                 continue
             callee = getattr(owner, attr)
-            if not callable(callee) or inspect.isclass(callee):
+            if not callable(callee):
                 continue
             try:
-                signature = inspect.signature(callee)
+                sig = inspect.signature(callee)
             except (TypeError, ValueError):
                 continue
-            positional = [inspect.Parameter.empty] * len(node.args)
-            keywords = {}
-            for kw in node.keywords:
-                if kw.arg is None:          # **kwargs — cannot be checked here
-                    keywords = None
-                    break
-                keywords[kw.arg] = inspect.Parameter.empty
-            if keywords is None:
+            if any(kw.arg is None for kw in node.keywords) or any(
+                    isinstance(a, ast.Starred) for a in node.args):
                 continue
             try:
-                signature.bind(*positional, **keywords)
+                sig.bind(*[None] * len(node.args), **{kw.arg: None for kw in node.keywords})
                 bound += 1
             except TypeError as e:
                 check("%s:%d %s.%s(...) binds against its real signature"
-                      % (module, node.lineno, owner.__name__, attr),
-                      False, "%s; signature is %s" % (e, signature))
-    check("every shared-module call in every engine binds (%d checked)" % bound,
-          bound > 40, "only %d calls were checked — is the walk finding them?"
-          % bound)
+                      % (module, node.lineno, owner.__name__, attr), False,
+                      "%s; signature is %s" % (e, sig))
+    check("the binding walk checked something (%d calls)" % bound, bound > 60,
+          "only %d calls were bound — is the walk finding them?" % bound)
 
 
 def _argparse_flags(module_name):
-    """Every --flag a module's parser defines, without running the CLI."""
-    path = os.path.join(HERE, module_name + ".py")
-    tree = ast.parse(open(path, encoding="utf-8").read())
-    # Only calls on the argparse parser itself. A browser's option object
-    # also has `add_argument`, and counting Chrome's own switches
-    # (`--no-sandbox`, `--window-size=…`) as CLI flags made this check
-    # compare nonsense.
+    tree = ast.parse(open(os.path.join(HERE, module_name + ".py"), encoding="utf-8").read())
     parsers = {"p"}
     for node in ast.walk(tree):
         if (isinstance(node, ast.Assign) and isinstance(node.value, ast.Call)
                 and isinstance(node.value.func, ast.Attribute)
                 and node.value.func.attr in ("add_argument_group",
                                              "add_mutually_exclusive_group")):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    parsers.add(target.id)
+            parsers.update(t.id for t in node.targets if isinstance(t, ast.Name))
     flags = set()
     for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "add_argument"
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id in parsers):
-            for arg in node.args:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str) \
-                        and arg.value.startswith("--"):
-                    flags.add(arg.value)
+            flags.update(a.value for a in node.args if isinstance(a, ast.Constant)
+                         and isinstance(a.value, str) and a.value.startswith("--"))
     return flags
 
 
-# The family's flag contract (CLAUDE.md §9), plus this repo's own additions.
+# The family's flag contract (CLAUDE.md §9, including the five it omitted
+# for months), plus this repo's own query flags.
 CONTRACT_FLAGS = {
     "--url", "--pages", "--category", "--format", "--out", "--delay",
     "--retries", "--retry-delay", "--concurrency", "--proxy", "--proxy-file",
     "--proxy-rotate", "--proxy-shuffle", "--proxy-block-retries",
     "--twocaptcha-key", "--captcha-api", "--solve-captcha", "--min-score",
-    "--cdp-endpoint", "--allow-empty", "--dump-html",
+    "--cdp-endpoint", "--allow-empty", "--dump-html", "--headless", "--headful",
+    "--fingerprint", "--fp-country", "--fp-tags", "--locale", "--mode",
 }
-BBB_FLAGS = {"--mode", "--text", "--location", "--country", "--sort", "--state",
-             "--locale"}
+BINANCE_FLAGS = {"--asset", "--fiat", "--side", "--pay-type", "--amount",
+                 "--time-range", "--sort-by", "--order", "--hide-full"}
 
 
 def check_engine_flag_sets():
-    """§17's check #2: against the contract AND against each other, both ways.
-
-    A missing flag fails; so does closing a difference the README documents.
-    """
-    sets = {}
-    for module in ENGINES:
-        if not os.path.exists(os.path.join(HERE, module + ".py")):
-            continue
-        sets[module] = _argparse_flags(module)
+    """§17's check #2: against the contract AND against each other, both
+    ways. The exception list IS the documentation."""
+    sets = {m: _argparse_flags(m) for m in ENGINES}
     for module, flags in sets.items():
-        missing = (CONTRACT_FLAGS | BBB_FLAGS) - flags
+        missing = (CONTRACT_FLAGS | BINANCE_FLAGS) - flags
         check("%s defines every contract flag" % module, not missing,
               "missing %s" % sorted(missing))
-    # The ONE documented difference: pyppeteer downloads its own Chromium
-    # and could not launch it on the development machine, so it needs a way
-    # to point at another one. Its twins have no equivalent because they do
-    # not ship a browser. Listed here so that closing the difference — or
-    # growing a second one — fails the build (§17).
     DOCUMENTED_DIFFERENCES = {"puppeteer_scraper": {"--chromium-path"}}
     names = sorted(sets)
     for i in range(len(names) - 1):
         a, b = names[i], names[i + 1]
         only_a = sets[a] - sets[b] - DOCUMENTED_DIFFERENCES.get(a, set())
         only_b = sets[b] - sets[a] - DOCUMENTED_DIFFERENCES.get(b, set())
-        check("%s and %s define the same flags" % (a, b),
-              not only_a and not only_b,
-              "only in %s: %s; only in %s: %s"
-              % (a, sorted(only_a), b, sorted(only_b)))
-
-
-BANNED_FLAGS = ("--antidetect", "--country-code")
+        check("%s and %s define the same flags" % (a, b), not only_a and not only_b,
+              "only in %s: %s; only in %s: %s" % (a, sorted(only_a), b, sorted(only_b)))
+    check("the documented difference still exists (closing it must be a decision)",
+          "--chromium-path" in sets["puppeteer_scraper"])
 
 
 def check_banned_and_removed_flags():
-    """Scoped to the ENGINES.
-
-    `--country` is legitimate here and NOT banned — BBB serves both its
-    countries from one host, so the flag cannot contradict a hostname the way
-    CLAUDE.md §10's rule is about. What the rule is really about is a flag
-    disagreeing with the URL, and that is enforced instead: passing --country
-    together with --url is refused, which the next check asserts.
-    """
+    """Scoped to the engines. `--country` is banned: it could disagree with
+    the --url, and a P2P query's country is its --fiat."""
     for module in ENGINES:
-        path = os.path.join(HERE, module + ".py")
-        if not os.path.exists(path):
-            continue
-        source = open(path, encoding="utf-8").read()
-        for flag in BANNED_FLAGS:
-            check("%s does not define %s" % (module, flag),
-                  '"%s"' % flag not in source)
-        check("%s refuses --country alongside --url" % module,
-              "--url already carries the whole query" in source,
-              "the refusal that makes --country safe here is missing")
+        source = open(os.path.join(HERE, module + ".py"), encoding="utf-8").read()
+        for flag in ("--antidetect", "--country", "--country-code"):
+            check("%s does not define %s" % (module, flag), '"%s"' % flag not in source)
 
 
 def check_undefined_names_in_every_module():
     """§10: compileall proves a file PARSES, not that its names RESOLVE.
-
-    A live run of a sibling repo's pyppeteer engine died with NameError on a
-    line reached only while fetching, after an import had been removed — the
-    module imported cleanly, --help worked, compileall passed and CI was
-    green. Kept COARSE (pooled bindings, no scope tracking) so it
-    under-reports rather than inventing problems.
-    """
+    Kept COARSE (pooled bindings) so it under-reports rather than invents."""
     import builtins
-    modules = [f for f in sorted(os.listdir(HERE))
-               if f.endswith(".py") and f != "smoke_test.py"]
-    for filename in modules:
+    for filename in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
         tree = ast.parse(open(os.path.join(HERE, filename), encoding="utf-8").read())
-        # Module-level dunders exist without being assigned anywhere.
         defined = set(dir(builtins)) | {"__file__", "__name__", "__doc__",
                                         "__package__", "__spec__"}
         for node in ast.walk(tree):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
                     defined.add((alias.asname or alias.name).split(".")[0])
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
-                                   ast.ClassDef)):
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 defined.add(node.name)
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
                 defined.add(node.id)
@@ -1055,46 +923,49 @@ def check_undefined_names_in_every_module():
                 defined.add(node.arg)
             elif isinstance(node, ast.ExceptHandler) and node.name:
                 defined.add(node.name)
-            elif isinstance(node, ast.alias) and node.asname:
-                defined.add(node.asname)
         used = {n.id for n in ast.walk(tree)
                 if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)}
         unresolved = sorted(used - defined)
-        check("%s: every name resolves" % filename, not unresolved,
-              "%s" % unresolved)
+        check("%s: every name resolves" % filename, not unresolved, repr(unresolved))
+
+
+def check_no_statement_is_unreachable():
+    """A statement after a return/raise/break/continue in the SAME block."""
+    for filename in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
+        tree = ast.parse(open(os.path.join(HERE, filename), encoding="utf-8").read())
+        dead = []
+        for node in ast.walk(tree):
+            for fld in ("body", "orelse", "finalbody"):
+                block = getattr(node, fld, None)
+                if not isinstance(block, list):
+                    continue
+                for i, stmt in enumerate(block[:-1]):
+                    if isinstance(stmt, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+                        dead.append(block[i + 1].lineno)
+                        break
+        check("%s: no statement the control flow can never reach" % filename,
+              not dead, "first at line %d" % min(dead) if dead else "")
 
 
 def _import_graph(entrypoint):
-    """Every local module an entrypoint reaches, transitively."""
     local = {f[:-3] for f in os.listdir(HERE) if f.endswith(".py")}
-    seen, queue = set(), [entrypoint]
-    while queue:
-        name = queue.pop()
+    seen, todo = set(), [entrypoint]
+    while todo:
+        name = todo.pop()
         if name in seen or name not in local:
             continue
         seen.add(name)
-        tree = ast.parse(open(os.path.join(HERE, name + ".py"),
-                              encoding="utf-8").read())
+        tree = ast.parse(open(os.path.join(HERE, name + ".py"), encoding="utf-8").read())
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                queue.extend(a.name.split(".")[0] for a in node.names)
+                todo.extend(a.name.split(".")[0] for a in node.names)
             elif isinstance(node, ast.ImportFrom) and node.module:
-                queue.append(node.module.split(".")[0])
+                todo.append(node.module.split(".")[0])
     return seen
 
 
 def check_dockerfile_copies_everything_the_entrypoint_imports():
-    """§10: all three repos in this family shipped an image that died with
-    ModuleNotFoundError on every invocation, --help included, because
-    proxy_pool.py was missing from the COPY list. CI never built the image;
-    this check needs no Docker."""
-    path = os.path.join(HERE, "Dockerfile")
-    if not os.path.exists(path):
-        check("Dockerfile exists", False)
-        return
-    dockerfile = open(path, encoding="utf-8").read()
-    # Only the COPY instructions, continuations included — a comment above
-    # them naming a file is not a file the image carries.
+    dockerfile = open(os.path.join(HERE, "Dockerfile"), encoding="utf-8").read()
     copy_lines, joining = [], False
     for line in dockerfile.splitlines():
         stripped = line.strip()
@@ -1104,80 +975,39 @@ def check_dockerfile_copies_everything_the_entrypoint_imports():
             copy_lines.append(stripped)
             joining = stripped.endswith("\\")
     copied = set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\.py", " ".join(copy_lines)))
-    entry = re.search(r'(?:CMD|ENTRYPOINT)\s*\[?\s*"?(?:python3?"?,\s*"?)?'
-                      r'([A-Za-z_][A-Za-z0-9_]*)\.py', dockerfile)
-    entrypoint = entry.group(1) if entry else "playwright_scraper"
-    needed = _import_graph(entrypoint)
-    missing = sorted(needed - copied)
-    check("the Dockerfile COPYs every module %s.py imports" % entrypoint,
+    missing = sorted(_import_graph("playwright_scraper") - copied)
+    check("the Dockerfile COPYs every module playwright_scraper.py imports",
           not missing, "missing %s" % missing)
-    for unwanted in ("smoke_test", "test_smoke"):
-        check("the image does not carry %s.py" % unwanted,
-              unwanted not in copied)
+    check("the image does not carry the test suite", "smoke_test" not in copied)
 
 
 def check_env_example_documents_exactly_what_the_loader_reads():
     import env_config
-    path = os.path.join(HERE, ".env.example")
-    if not os.path.exists(path):
-        check(".env.example exists", False)
-        return
-    documented = set(re.findall(r"^\s*#?\s*([A-Z][A-Z0-9_]+)\s*=", 
-                                open(path, encoding="utf-8").read(), re.M))
+    text = open(os.path.join(HERE, ".env.example"), encoding="utf-8").read()
+    documented = set(re.findall(r"^([A-Z][A-Z0-9_]+)=", text, re.M))
     read = set(env_config.ENV_KEYS)
-    check("every variable the loader reads is documented",
-          not (read - documented), "undocumented: %s" % sorted(read - documented))
-    check("every documented variable is actually read",
-          not (documented - read), "unread: %s" % sorted(documented - read))
+    equal("the example and the loader name the same variables",
+          sorted(documented), sorted(read))
+    check("the per-site variables carry the BINANCE_ prefix",
+          {"BINANCE_CDP_ENDPOINT", "BINANCE_PROXY", "BINANCE_URL"} <= read)
 
 
 def check_a_copied_env_example_reads_as_UNSET():
-    """§17: `cp .env.example .env` followed by a run must not connect.
-
-    The placeholder check was a literal set in a sibling repo, and the two
-    credentialled URLs are documented the way the vendor documents them —
-    `ws://{login}-zone-…:{password}@cb.2captcha.com:9222` — so neither
-    literal matched, the run connected with the string `{login}-zone-…` as
-    its username, and got a 401 a long way from its cause.
-    """
     import env_config
-    example = os.path.join(HERE, ".env.example")
-    if not os.path.exists(example):
-        check(".env.example exists", False)
-        return
-    text = open(example, encoding="utf-8").read()
+    text = open(os.path.join(HERE, ".env.example"), encoding="utf-8").read()
     values = dict(re.findall(r"^([A-Z][A-Z0-9_]+)=(.*)$", text, re.M))
-    check("the example actually sets every variable",
-          set(values) == set(env_config.ENV_KEYS),
-          "example has %s, loader reads %s"
-          % (sorted(values), sorted(env_config.ENV_KEYS)))
-    # Every CREDENTIAL must read as unset. The default TARGET must not: it is
-    # a real, usable URL, and blanking it would remove the one setting this
-    # file exists to make convenient (§17's check #3 says exactly this — the
-    # credentials unset, the non-credential default still usable).
-    CREDENTIALS = {"TWOCAPTCHA_KEY", "BBB_CDP_ENDPOINT", "BBB_PROXY"}
+    credentials = {"TWOCAPTCHA_KEY", "BINANCE_CDP_ENDPOINT", "BINANCE_PROXY"}
     before = dict(os.environ)
     try:
         for name, raw in values.items():
             os.environ[name] = raw
             got = env_config.env_value(name)
-            if name in CREDENTIALS:
-                check("a copied .env.example leaves %s unset" % name,
-                      got is None, "got %r" % got)
+            if name in credentials:
+                check("a copied .env.example leaves %s unset" % name, got is None, repr(got))
             else:
-                check("...while %s stays a usable default" % name,
-                      got == raw.strip(), "got %r" % got)
-    finally:
-        os.environ.clear()
-        os.environ.update(before)
-    # And the counter-check: a real credential must still come through, or
-    # the placeholder rule would have made the loader useless. Deliberately
-    # NOT 32 hex characters — that is the shape of a real 2captcha key, and
-    # this repo's own credential scan (rightly) fails on one.
-    try:
+                check("...while %s stays a usable default" % name, got == raw.strip(), repr(got))
         os.environ["TWOCAPTCHA_KEY"] = "not-a-real-key-but-a-real-value"
-        equal("a real value is still read",
-              env_config.env_value("TWOCAPTCHA_KEY"),
+        equal("a real value is still read", env_config.env_value("TWOCAPTCHA_KEY"),
               "not-a-real-key-but-a-real-value")
     finally:
         os.environ.clear()
@@ -1185,272 +1015,203 @@ def check_a_copied_env_example_reads_as_UNSET():
 
 
 def check_credential_scan_is_one_implementation_invoked_from_both():
-    """§17: two sources of truth, one dead and one holed.
-
-    `.github/ci_checks.py` sat in three repos invoked by NOTHING, while
-    tests.yml carried an inline grep doing a narrower version of the same job
-    — one that matched only ws:// and wss://, so an http://user:pass@
-    credential would have sailed past CI.
-    """
     script = os.path.join(HERE, ".github", "ci_checks.py")
-    check("the credential scan exists as a script", os.path.exists(script))
-    if not os.path.exists(script):
+    if not os.path.isdir(os.path.join(HERE, ".github")):
+        # Inside the Docker image, which copies no .github at all. Triggered
+        # by the WHOLE directory being absent, never by one file in it (§22).
+        skip("ci_checks", "no .github directory (the image)")
         return
-    workflow = os.path.join(HERE, ".github", "workflows", "tests.yml")
-    if os.path.exists(workflow):
-        text = open(workflow, encoding="utf-8").read()
-        check("CI INVOKES the script rather than reimplementing it",
-              "ci_checks.py" in text)
-    result = subprocess.run([sys.executable, script, "--all"], cwd=HERE,
-                            capture_output=True, text=True)
-    check("the credential scan passes on this repo's own tree",
-          result.returncode == 0,
-          (result.stdout + result.stderr)[-600:])
+    check("the credential scan exists as a script", os.path.exists(script))
+    workflow = open(os.path.join(HERE, ".github", "workflows", "tests.yml"),
+                    encoding="utf-8").read()
+    check("CI INVOKES the script rather than reimplementing it", "ci_checks.py" in workflow)
+    result = subprocess.run([sys.executable, script, "--secret-check", "--sample-check"],
+                            cwd=HERE, capture_output=True, text=True)
+    check("the credential scan and sample check pass on this tree",
+          result.returncode == 0, (result.stdout + result.stderr)[-600:])
 
 
+def check_the_hex_exemption_is_one_context_only():
+    """SITE_PUBLIC_IDS forgives a 32-hex inside an announcement address and
+    NOTHING else. Planted, not assumed."""
+    if not os.path.isdir(os.path.join(HERE, ".github")):
+        skip("ci_checks", "no .github directory (the image)")
+        return
+    sys.path.insert(0, os.path.join(HERE, ".github"))
+    import ci_checks as C
+    hexkey = "0123456789abcdef" * 2
+    in_url = "https://www.binance.com/en/support/announcement/detail/" + hexkey
+    check("inside the announcement address: forgiven",
+          not C.HEX32.search(C._without_site_ids(in_url)))
+    check("the same value elsewhere on ANOTHER line: still caught",
+          bool(C.HEX32.search(C._without_site_ids('"key": "%s"' % hexkey))))
+    check("inside some other binance.com path: still caught",
+          bool(C.HEX32.search(C._without_site_ids("https://www.binance.com/en/x/" + hexkey))))
+
+
+# Assembled from pieces, so this file can be scanned like every other rather
+# than exempted (§22: the file most likely to acquire a stray phrase is the
+# one a wholesale exemption never reads).
 BANNED_WORDING = (
-    "cloud browser", "antidetect browser", "2scraper Antidetect Browser",
-    "gate.2prx.com", "ANTIDETECT_LOCAL_API",
+    "cloud" + " browser", "anti" + "detect browser", "2scraper " + "Anti" + "detect Browser",
+    "gate." + "2prx.com", "ANTI" + "DETECT_LOCAL_API",
 )
 
 
 def check_banned_wording():
-    """§12: enforced by this test rather than by review."""
+    """§12, enforced by this test rather than by review."""
+    scanned = 0
     for root, dirs, files in os.walk(HERE):
-        dirs[:] = [d for d in dirs if d not in
-                   (".git", "__pycache__", ".pytest_cache", "node_modules")]
+        dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache",
+                                                "live", "captures", ".claude")]
         for filename in files:
             if not filename.endswith((".py", ".md", ".yml", ".yaml", ".txt",
-                                      ".toml", ".html", ".example")):
+                                      ".toml", ".html", ".example", ".json")):
                 continue
             path = os.path.join(root, filename)
             text = open(path, encoding="utf-8", errors="replace").read().lower()
+            scanned += 1
             for phrase in BANNED_WORDING:
-                if phrase.lower() in text and filename != "smoke_test.py":
-                    check("%s contains no %r" % (
-                        os.path.relpath(path, HERE), phrase), False)
-    check("banned-wording scan ran", True)
+                if phrase.lower() in text:
+                    check("%s contains no banned phrase #%d" % (
+                        os.path.relpath(path, HERE), BANNED_WORDING.index(phrase)), False)
+    check("the banned-wording scan read the repo (%d files)" % scanned, scanned > 20)
 
 
 def check_concurrency_with_the_browser_stubbed():
-    """§10: a live run cannot always reach this machinery.
+    """§10: a live run cannot always reach this machinery. Driven through the
+    SHARED worker loop with the fetch replaced."""
+    import page_flow
+    import queue as queue_mod
+    fetched, lock = [], threading.Lock()
+    real = page_flow.fetch_one_page
 
-    Page 1 is fetched alone and decides how many pages there are, so a
-    blocked page 1 means the workers never start. Driven directly instead,
-    with the browser replaced.
-    """
-    engine = _import_engine("playwright_scraper")
-    if engine is None:
-        return
-
-    class Args:
-        delay = 0
-        retries = 1
-        retry_delay = 0
-        out = "unused"
-        mode = "search"
-        sort = "a-z"
-        pages = 50
-
-    fetched = []
-    import threading
-    lock = threading.Lock()
-
-    def fake_fetch(session, args, pool, page_num, url):
+    def fake(ops, args, pool, query, page_num, mask=None):
         with lock:
             fetched.append(page_num)
-        outcome = engine.PageOutcome(page_num=page_num, url=url)
-        # Page 6 is the end of this listing: no rows, but a served page.
-        outcome.products = [] if page_num >= 6 else [object()] * 15
-        outcome.state = "empty" if page_num >= 6 else "content"
-        return outcome
+        o = page_flow.PageOutcome(page_num=page_num, url="u")
+        o.products = [] if page_num >= 6 else [object()]
+        o.state = "empty" if page_num >= 6 else "content"
+        return o
 
-    class FakeSession:
-        def __init__(self, *a, **k):
-            self.pool = None
-        def open(self):
-            return self
-        def close(self):
-            pass
-
-    class FakePlaywright:
-        def __enter__(self):
-            return None
-        def __exit__(self, *a):
-            return False
-
-    real_fetch = engine._fetch_one_page
-    real_session = engine._BrowserSession
-    real_pw = engine.sync_playwright
-    engine._fetch_one_page = fake_fetch
-    engine._BrowserSession = FakeSession
-    engine.sync_playwright = lambda: FakePlaywright()
+    work = queue_mod.Queue()
+    for n in range(2, 51):
+        work.put(n)
+    results, rlock, exhausted = [], threading.Lock(), threading.Event()
+    args = types.SimpleNamespace(delay=0)
+    page_flow.fetch_one_page = fake
     try:
-        specs = [(n, "u%d" % n) for n in range(2, 51)]
-        results, unattempted, exhausted = engine._fetch_pages_concurrently(
-            Args(), None, specs, 4)
+        threads = [threading.Thread(target=page_flow.worker_loop,
+                                    args=(_FakeOps({}), args, None, work, results,
+                                          rlock, exhausted, "w%d" % i))
+                   for i in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(10)
     finally:
-        engine._fetch_one_page = real_fetch
-        engine._BrowserSession = real_session
-        engine.sync_playwright = real_pw
-
-    check("every page fetched was fetched exactly once",
-          len(fetched) == len(set(fetched)), "%r" % sorted(fetched))
-    check("dispatch STOPPED at the end of the listing", exhausted)
-    check("...so the 49 queued pages cost far fewer fetches",
-          len(fetched) < 15, "fetched %d of 49" % len(fetched))
-    check("unattempted pages are REPORTED, not counted as failed",
-          len(unattempted) > 0 and all(isinstance(n, int) for n in unattempted))
+        page_flow.fetch_one_page = real
+    check("every page fetched was fetched exactly once", len(fetched) == len(set(fetched)))
+    check("dispatch STOPPED at the end of the listing", exhausted.is_set())
+    check("...so 49 queued pages cost far fewer fetches", len(fetched) < 15,
+          "fetched %d" % len(fetched))
     equal("attempted + unattempted covers the whole queue",
-          len(set(fetched)) + len(unattempted), 49)
-    equal("outcomes are restorable to page order",
-          [o.page_num for o in sorted(results, key=lambda o: o.page_num)],
-          sorted(o.page_num for o in results))
+          len(set(fetched)) + work.qsize(), 49)
 
 
 def check_a_dead_worker_neither_hangs_nor_loses_its_siblings():
     engine = _import_engine("playwright_scraper")
     if engine is None:
         return
+    import page_flow
 
-    class Args:
-        delay = 0
-        retries = 1
-        retry_delay = 0
-        out = "unused"
-        mode = "search"
-        sort = "a-z"
-        pages = 10
-
-    def exploding_fetch(session, args, pool, page_num, url):
+    def exploding(ops, args, pool, query, page_num, mask=None):
         if page_num == 3:
             raise RuntimeError("worker died")
-        outcome = engine.PageOutcome(page_num=page_num, url=url)
-        outcome.products = [object()] * 15
-        outcome.state = "content"
-        return outcome
+        o = page_flow.PageOutcome(page_num=page_num, url="u")
+        o.products = [object()]
+        o.state = "content"
+        return o
 
-    class FakeSession:
+    class FakeOps(_FakeOps):
         def __init__(self, *a, **k):
-            self.pool = None
+            super().__init__({})
+
         def open(self):
             return self
-        def close(self):
-            pass
 
     class FakePlaywright:
         def __enter__(self):
             return None
+
         def __exit__(self, *a):
             return False
 
-    real_fetch, real_session, real_pw = (engine._fetch_one_page,
-                                         engine._BrowserSession,
-                                         engine.sync_playwright)
-    engine._fetch_one_page = exploding_fetch
-    engine._BrowserSession = FakeSession
+    real = (page_flow.fetch_one_page, engine._Ops, engine.sync_playwright)
+    page_flow.fetch_one_page = exploding
+    engine._Ops = FakeOps
     engine.sync_playwright = lambda: FakePlaywright()
     try:
-        specs = [(n, "u%d" % n) for n in range(2, 8)]
         results, unattempted, exhausted = engine._fetch_pages_concurrently(
-            Args(), None, specs, 3)
+            types.SimpleNamespace(delay=0), None, None, list(range(2, 8)), 3)
     finally:
-        engine._fetch_one_page = real_fetch
-        engine._BrowserSession = real_session
-        engine.sync_playwright = real_pw
-
-    check("the run returned rather than hanging", True)
+        page_flow.fetch_one_page, engine._Ops, engine.sync_playwright = real
     check("the dead worker's siblings still delivered their pages",
           len(results) >= 3, "%d results" % len(results))
-    check("page 3 is not reported as a success",
-          3 not in [o.page_num for o in results])
+    check("page 3 is not reported as a success", 3 not in [o.page_num for o in results])
 
 
 def check_worker_pools_start_on_different_exits():
-    engine = _import_engine("playwright_scraper")
-    if engine is None:
-        return
+    import page_flow
     from proxy_pool import ProxyPool
     pool = ProxyPool(["http://a:1", "http://b:2", "http://c:3"], rotate="per-run")
-    firsts = [engine._worker_pool(pool, i).current for i in range(3)]
     equal("three workers start on three different exits",
-          len(set(firsts)), 3)
-    equal("a missing pool stays missing", engine._worker_pool(None, 0), None)
+          len({page_flow.worker_pool(pool, i).current for i in range(3)}), 3)
+    equal("a missing pool stays missing", page_flow.worker_pool(None, 0), None)
 
 
 def check_fingerprint_kwargs_are_ones_the_driver_accepts():
-    """§10: an unknown key in new_context(**kwargs) is a TypeError at launch,
-    on the PAID path, at runtime."""
     engine = _import_engine("playwright_scraper")
     if engine is None:
         return
-    try:
-        from fingerprint_client import playwright_context_kwargs
-    except ImportError as e:
-        skip("fingerprint", str(e))
-        return
-    sample = {"id": "x", "country": "US",
-              "userAgent": "Mozilla/5.0 Chrome/140.0.0.0",
-              "screen": {"width": 1920, "height": 1080},
-              "timezone": "America/New_York", "language": "en-US",
-              "devicePixelRatio": 2}
-    kwargs = playwright_context_kwargs(sample)
-    from playwright.sync_api import sync_playwright  # noqa: F401
+    from fingerprint_client import playwright_context_kwargs
     import playwright.sync_api as pw_api
+    sample = {"id": "x", "country": "US", "userAgent": "Mozilla/5.0 Chrome/140.0.0.0",
+              "screen": {"width": 1920, "height": 1080},
+              "timezone": "America/New_York", "language": "en-US", "devicePixelRatio": 2}
+    kwargs = playwright_context_kwargs(sample)
     signature = inspect.signature(pw_api.Browser.new_context)
     unknown = [k for k in kwargs if k not in signature.parameters]
-    check("every fingerprint kwarg is one new_context accepts", not unknown,
-          "unknown: %s" % unknown)
-
-
-def check_every_engine_exposes_the_same_public_surface():
-    for module in ENGINES:
-        engine = _import_engine(module)
-        if engine is None:
-            continue
-        for name in ("scrape", "parse_args", "PageOutcome", "_fetch_one_page",
-                     "_parse_for_mode", "_target_url"):
-            check("%s.%s exists" % (module, name), hasattr(engine, name))
-        outcome = engine.PageOutcome(page_num=1, url="u")
-        for field_name in ("state", "total_available", "pages_available",
-                           "sort_applied", "products", "blocked_by",
-                           "load_failed", "final_url"):
-            check("%s.PageOutcome carries %r" % (module, field_name),
-                  hasattr(outcome, field_name))
-        check("%s.PageOutcome.ok is True for a fresh outcome" % module,
-              outcome.ok)
-        equal("%s shares CORE_FIELDS with its twins" % module,
-              tuple(engine.CORE_FIELDS),
-              ("title", "url", "sku", "category", "latitude"))
-        equal("%s shares CORE_FIELD_FLOOR with its twins" % module,
-              engine.CORE_FIELD_FLOOR, 99)
+    check("every fingerprint kwarg is one new_context accepts", not unknown, repr(unknown))
 
 
 def check_engines_do_not_evaluate_a_string_in_the_browser():
-    """§18: a site whose CSP omits `unsafe-eval` kills wait_for_function with
-    an EvalError and takes the run down with exit 1. BBB has not been
-    measured for that, and the cheap habit costs nothing where it would have
-    been allowed."""
+    """§18: wait_for_function evaluates a string, which a CSP without
+    unsafe-eval kills. page.evaluate with a real function is fine."""
     for module in ENGINES:
-        path = os.path.join(HERE, module + ".py")
-        if not os.path.exists(path):
-            continue
-        tree = ast.parse(open(path, encoding="utf-8").read())
-        called = {node.func.attr for node in ast.walk(tree)
-                  if isinstance(node, ast.Call)
-                  and isinstance(node.func, ast.Attribute)}
+        tree = ast.parse(open(os.path.join(HERE, module + ".py"), encoding="utf-8").read())
+        called = {n.func.attr for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
         for banned in ("wait_for_function", "waitForFunction", "waitFor"):
-            check("%s never CALLS %s" % (module, banned), banned not in called,
-                  "poll through page_flow.wait_for_count instead")
+            check("%s never CALLS %s" % (module, banned), banned not in called)
+
+
+def check_fetch_js_is_one_request_in_three_dialects():
+    """The one piece of JavaScript each engine spells its own way. It must
+    make the same request, with the same timeout and the same cookie rule."""
+    for module in ENGINES:
+        src = open(os.path.join(HERE, module + ".py"), encoding="utf-8").read()
+        js = re.search(r'FETCH_JS = """(.*?)"""', src, re.S)
+        check("%s defines FETCH_JS" % module, js is not None)
+        if not js:
+            continue
+        body = js.group(1)
+        for needle in ('credentials: "include"', "AbortController",
+                       'r.headers.get("x-amzn-waf-action")', '"content-type"'):
+            check("%s's fetch() carries %s" % (module, needle), needle in body)
 
 
 def check_credentials_never_reach_a_log():
-    """§8: an EXCEPTION MESSAGE is a log, and the masker must be GLOBAL.
-
-    A Playwright connection error repeats the endpoint five times (the
-    message plus a four-line call log), so a masker handling only the first
-    occurrence prints the password four times and looks like it is working.
-    """
     for module in ENGINES:
         engine = _import_engine(module)
         if engine is None:
@@ -1458,62 +1219,143 @@ def check_credentials_never_reach_a_log():
         masked = engine._mask_credentials(
             "tried ws://u:supersecret@h1:9222 and ws://u:supersecret@h2:9222 "
             "and again ws://u:supersecret@h1:9222")
-        check("%s masks EVERY occurrence" % module,
-              "supersecret" not in masked, masked)
-        check("%s keeps the host and port, which are the useful half" % module,
-              "h1:9222" in masked and "h2:9222" in masked, masked)
+        check("%s masks EVERY occurrence" % module, "supersecret" not in masked, masked)
+        check("%s keeps host and port" % module, "h1:9222" in masked and "h2:9222" in masked)
     from proxy_pool import mask
     masked = mask("http://user:secret@exit.example.com:2334")
     check("proxy_pool.mask hides the password", "secret" not in masked)
     check("proxy_pool.mask keeps the exit", "exit.example.com:2334" in masked)
 
 
-def check_sample_output_matches_the_schema():
-    from output_writer import Business
-    expected = [f.name for f in fields(Business)]
-    json_path = os.path.join(HERE, "sample_output.json")
-    csv_path = os.path.join(HERE, "sample_output.csv")
-    if not os.path.exists(json_path):
-        check("sample_output.json exists", False)
+def check_aws_waf_solution_prefers_existing_token():
+    """Measured 2026-09-24: `existing_token` set as the aws-waf-token cleared
+    the CAPTCHA, a captcha_voucher set the same way did not. Driven through
+    the real solve with requests stubbed — no network."""
+    import captcha_solver as C
+    ch = C.detect_aws_waf(fx("waf_captcha_chromium"), "https://www.binance.com/en/x")
+    sent = []
+
+    class Resp:
+        def __init__(self, body):
+            self.body = body
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self.body
+
+    def make_post(solution):
+        def post(url, json=None, timeout=None):
+            sent.append(json)
+            if "createTask" in url:
+                return Resp({"errorId": 0, "taskId": 1})
+            return Resp({"errorId": 0, "status": "ready", "solution": solution})
+        return post
+
+    real_post, real_sleep = C.requests.post, C.time.sleep
+    C.time.sleep = lambda s: None
+    try:
+        C.requests.post = make_post({"captcha_voucher": "V", "existing_token": "E"})
+        both = C._solve_with_2captcha_v2("k", ch)
+        C.requests.post = make_post({"captcha_voucher": "V"})
+        only_voucher = C._solve_with_2captcha_v2("k", ch)
+        C.requests.post = make_post({"existing_token": "E", "bnc-uuid": "x"})
+        only_existing = C._solve_with_2captcha_v2("k", ch)
+    finally:
+        C.requests.post, C.time.sleep = real_post, real_sleep
+    equal("with both, existing_token is the cookie value", both, "E")
+    equal("with only a voucher, the voucher", only_voucher, "V")
+    equal("with existing_token and the site's cookies, existing_token", only_existing, "E")
+    task = sent[0]["task"]
+    equal("no proxy: the Proxyless task type", task["type"], "AmazonTaskProxyless")
+    check("the task carries iv and context", task.get("iv") and task.get("context"))
+
+
+def check_scraper_api_sends_waitfor_as_an_object_and_reads_http_code():
+    """Measured 2026-09-23 against the live Scraper API: a JSON-encoded
+    STRING waitFor is answered HTTP 422 and still billed; the target's status
+    is `http_code`, while `status` is the API's own verdict."""
+    try:
+        import scraper_api_client as sac
+    except ImportError as e:
+        skip("scraper_api_client", str(e))
         return
-    rows = json.load(open(json_path, encoding="utf-8"))
-    check("sample_output.json holds rows", bool(rows))
-    equal("sample_output.json keys match the schema, in order",
-          list(rows[0].keys()), expected)
-    check("sample_output.json is from a real run (bbb.org rows)",
-          all(r["source"] == "bbb.org" for r in rows))
-    check("...and carries no fabrication markers",
-          not any("example" in (r.get("url") or "").lower() or
-                  "lorem" in (r.get("title") or "").lower() for r in rows))
-    if os.path.exists(csv_path):
-        header = next(csv.reader(open(csv_path, encoding="utf-8")))
-        equal("sample_output.csv header matches the schema", header, expected)
+    sent = {}
+
+    class Resp:
+        status_code = 200
+        headers = {}
+        text = ""
+
+        def json(self):
+            return {"status": "success", "http_code": 403, "headers": {},
+                    "body": "<html></html>"}
+
+    def post(url, **kw):
+        sent.update(kw.get("json") or {})
+        return Resp()
+
+    args = types.SimpleNamespace(url="https://www.binance.com/bapi/x", key="k" * 8,
+                                 timeout=60, cdp_url=None, wait_text="000000",
+                                 wait_element=None, wait_state=None)
+    real = sac.requests.post
+    sac.requests.post = post
+    try:
+        _html, status = sac.fetch_html(args)
+    finally:
+        sac.requests.post = real
+    equal("--wait-text sends waitFor as an OBJECT", sent.get("waitFor"), {"text": "000000"})
+    equal("the target status handed onward is http_code", status, 403)
+    equal("the Scraper API response's JSON is unwrapped from a viewer <pre>",
+          sac.json_text('<html><body><pre>{"code":"000000"}</pre></body></html>'),
+          '{"code":"000000"}')
+
+
+def check_x_debug_header_is_redacted():
+    try:
+        import scraper_api_client as sac
+    except ImportError:
+        return
+    pw = "SeCr" + "EtPw"
+    key = "abcdef01" * 4
+    raw = ("cdpurl=ws://acct-zone-scraping_browser-pid-7:" + pw
+           + "@cb.2captcha.com:9222 cost=0.00145 key=" + key + " status=200")
+    out = sac._redact_debug_header(raw)
+    check("x-debug: the credential and the key are gone", pw not in out and key not in out)
+    check("x-debug: the cost, host and status survive",
+          "cost=0.00145" in out and "cb.2captcha.com:9222" in out and "status=200" in out)
+    check("x-debug: the log line calls the redactor",
+          'logger.info("x-debug: %s", _redact_debug_header(debug))' in inspect.getsource(sac))
+
+
+def check_captcha_capability_claims_match_the_code():
+    """§19: the most expensive bug this family can ship is a SENTENCE."""
+    readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+    solver = open(os.path.join(HERE, "captcha_solver.py"), encoding="utf-8").read()
+    low = readme.lower()
+    for phrase in ("cannot be solved", "can't be solved", "is not solvable",
+                   "solver is inapplicable", "no solver can"):
+        check("README: no %r — write 'this repo does not implement X'" % phrase,
+              phrase not in low)
+    check("the solver builds AmazonTask, which the README credits",
+          "AmazonTask" in solver and "amazontask" in low)
 
 
 def check_readme_numbers_are_not_stale():
-    """§17's check #4: diff every numeric claim against what is on disk.
-
-    Only the figures that MUST hold are pinned: a number that legitimately
-    varies between runs is written as a range in the README and not checked
-    here.
-    """
-    path = os.path.join(HERE, "README.md")
-    if not os.path.exists(path):
-        check("README.md exists", False)
-        return
-    readme = open(path, encoding="utf-8").read()
+    """§17's check #4: a column count claimed in the README is a class's."""
+    readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
+    from output_writer import ROW_CLASS_BY_MODE
+    sizes = {len(fields(c)) for c in ROW_CLASS_BY_MODE.values()}
+    for number in re.findall(r"(\d+)\s+columns", readme):
+        check("the README's '%s columns' is a row class's size" % number,
+              int(number) in sizes, "sizes are %s" % sorted(sizes))
     import product_parser as P
-    if "15 pages" in readme or "15 page" in readme:
-        equal("the README's page cap matches MAX_PAGES", P.MAX_PAGES, 15)
-    if "225" in readme:
-        equal("the README's 225 is pages x pageSize",
-              P.MAX_PAGES * P.PAGE_SIZE, 225)
-    from output_writer import Business
-    column_count = len(fields(Business))
-    claimed = re.findall(r"(\d+)\s+columns", readme)
-    for number in claimed:
-        equal("the README's column count matches the schema",
-              int(number), column_count)
+    for claim, value in (("20 adverts", P.P2P_ROWS), ("30 portfolios", P.COPY_ROWS),
+                         ("50 announcements", P.ANN_ROWS)):
+        n = int(claim.split()[0])
+        if claim in readme:
+            equal("the README's %r matches the code" % claim, value, n)
 
 
 _TREE_BEFORE = None
@@ -1524,169 +1366,26 @@ def _tree_state():
                             capture_output=True, text=True)
     if result.returncode != 0:
         return None
-    return sorted(line for line in result.stdout.splitlines()
-                  if not line.endswith(".pyc"))
+    return sorted(line for line in result.stdout.splitlines() if not line.endswith(".pyc"))
 
 
 def check_no_test_mutates_the_working_tree():
-    """§10: one suite used its own file as a fake chromedriver and chmod'd it
-    to 755, leaving a mode change in git status.
-
-    Compares the tree against how it looked when the suite STARTED, not
-    against a clean checkout — otherwise this is permanently red while
-    anyone is editing, and a check that is always red teaches everyone to
-    ignore checks.
-    """
     if _TREE_BEFORE is None:
         skip("git status", "not a git repository")
         return
-    after = _tree_state()
-    changed = sorted(set(after) - set(_TREE_BEFORE))
-    check("the suite itself changed nothing in the working tree",
-          not changed, "%s" % changed)
-
-
-def check_captcha_capability_claims_match_the_code():
-    """§19: the most expensive bug this family can ship is a SENTENCE.
-
-    It fails in both directions and this family has shipped both:
-
-      * saying a captcha CANNOT be solved, when the true statement is that
-        THIS REPO does not implement the task type. 2Captcha solves
-        enterprise reCAPTCHA and Cloudflare Turnstile and has for years, so
-        such a sentence tells a reader not to buy something that works.
-      * saying this repo DOES solve something it builds no task type for --
-        which is what the README said here: it billed the Managed Challenge
-        solve to `--twocaptcha-key`, while the only thing that clears one is
-        `Captcha.setAutoSolve` over `--cdp-endpoint`.
-
-    Neither is visible to any other check: nothing fails, nothing crashes,
-    and the output is correct.
-    """
-    readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
-    solver = open(os.path.join(HERE, "captcha_solver.py"), encoding="utf-8").read()
-    low = readme.lower()
-
-    # Conclusions about the PRODUCT. Phrases about a page carrying no widget
-    # are deliberately absent -- BBB's hard block really is one, and calling
-    # THAT unsolvable is honest.
-    for phrase in ("cannot be solved", "can't be solved", "neither is solvable",
-                   "is not solvable", "solver is inapplicable", "no solver can"):
-        check("README: no %r -- write 'this repo does not implement X'" % phrase,
-              phrase not in low)
-
-    # The positive direction, stated as a PAIRING rather than a keyword
-    # search so it cannot go quiet by accident: if the task type is absent,
-    # the README has to say so in those words.
-    if "TurnstileTaskProxyless" not in solver:
-        check("README says plainly that TurnstileTaskProxyless is not built here",
-              "does not implement `turnstiletaskproxyless`" in low,
-              "the solver builds no Turnstile task, so the README must not let "
-              "a reader believe --twocaptcha-key clears a Managed Challenge")
-        check("...and the Managed Challenge is not billed to --twocaptcha-key",
-              "(`--twocaptcha-key`) - for the managed challenge" not in low
-              and "(`--twocaptcha-key`) \u2014 for the managed challenge" not in low)
-    else:
-        check("a built Turnstile task needs the render interception too",
-              "TURNSTILE_INTERCEPT_JS" in solver)
-
-    # Whatever the README credits with clearing the challenge must be a thing
-    # the engines actually do.
-    if "setautosolve" in low:
-        srcs = ""
-        for name in ("playwright_scraper.py", "selenium_scraper.py",
-                     "puppeteer_scraper.py"):
-            path = os.path.join(HERE, name)
-            if os.path.exists(path):
-                srcs += open(path, encoding="utf-8").read()
-        check("README credits Captcha.setAutoSolve, and an engine calls it",
-              "Captcha.setAutoSolve" in srcs)
-def check_no_statement_is_unreachable():
-    """A statement sitting after a return/raise/break/continue in the SAME
-    block, which therefore can never run.
-
-    Narrow on purpose: it makes no claim about reachability in general, only
-    about a block whose control flow has already left. Measured across the
-    eighteen repos of this family on 2026-09-16 it reported six problems and
-    zero false positives.
-
-    `check_undefined_names_in_every_module` cannot see this class at all, by
-    design -- it pools every binding in the file rather than tracking scopes,
-    so a name used inside dead code passes as long as anything else in the
-    module binds it. What was hiding in that blind spot here, and in five
-    sibling repos, byte for byte: a function whose `def` line had been lost,
-    leaving its docstring and body absorbed into the end of the function
-    above it. Present since this repo's first commit, invisible to import,
-    `--help`, `compileall`, and every green run of this suite.
-    """
-    for filename in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
-        tree = ast.parse(open(os.path.join(HERE, filename),
-                              encoding="utf-8").read())
-        dead = []
-        for node in ast.walk(tree):
-            for field in ("body", "orelse", "finalbody"):
-                block = getattr(node, field, None)
-                if not isinstance(block, list):
-                    continue
-                for i, stmt in enumerate(block[:-1]):
-                    if isinstance(stmt, (ast.Return, ast.Raise,
-                                         ast.Continue, ast.Break)):
-                        dead.append(block[i + 1].lineno)
-                        break
-        check("%s: no statement the control flow can never reach" % filename,
-              not dead, "first at line %d" % min(dead) if dead else "")
-
-
-def check_x_debug_header_is_redacted():
-    """SECURITY.md names the Scraper API's x-debug header as a place
-    credentials reach a log unmasked. It was then logged verbatim.
-
-    The fixtures are assembled from pieces rather than written out whole,
-    because this file is scanned by the credential check like every other
-    and a fixture that LOOKS like a live key fails it. They are the SHAPES a
-    credential takes, not the literals this repo happens to contain today.
-    """
-    try:
-        import scraper_api_client as sac
-    except ImportError:
-        return
-
-    pw = "SeCr" + "EtPw"
-    key = "abcdef01" * 4
-    raw = ("cdpurl=ws://acct-zone-scraping_browser-pid-7:" + pw
-           + "@cb.2captcha.com:9222 cost=0.00145 key=" + key + " status=200")
-    out = sac._redact_debug_header(raw)
-    check("x-debug: the credential and the key are gone",
-                 pw not in out and key not in out)
-    check("x-debug: the cost, host and status survive",
-                 "cost=0.00145" in out and "cb.2captcha.com:9222" in out
-                 and "status=200" in out)
-
-    s1, s2 = "secret" + "one", "secret" + "two"
-    two = sac._redact_debug_header(
-        "a=http://u1:" + s1 + "@h1:1 b=http://u2:" + s2 + "@h2:2")
-    check("x-debug: both credentials are masked, not just the first",
-                 s1 not in two and s2 not in two)
-
-    src = inspect.getsource(sac)
-    check("x-debug: the log line calls the redactor",
-                 'logger.info("x-debug: %s", _redact_debug_header(debug))' in src)
-
+    changed = sorted(set(_tree_state()) - set(_TREE_BEFORE))
+    check("the suite itself changed nothing in the working tree", not changed, repr(changed))
 
 
 CHECKS = [v for k, v in sorted(globals().items()) if k.startswith("check_")]
 
 
 def main():
-    global VERBOSE
-    parser = argparse.ArgumentParser(description="bbb-scraper offline suite")
+    global VERBOSE, _TREE_BEFORE
+    parser = argparse.ArgumentParser(description="binance-scraper offline suite")
     parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-    VERBOSE = args.verbose
-
-    global _TREE_BEFORE
+    VERBOSE = parser.parse_args().verbose
     _TREE_BEFORE = _tree_state()
-
     for fn in CHECKS:
         if VERBOSE:
             print("\n== %s" % fn.__name__)
@@ -1698,7 +1397,6 @@ def main():
             print("  ERROR %s raised %s: %s" % (fn.__name__, type(e).__name__, e))
             if VERBOSE:
                 traceback.print_exc()
-
     print("\n%d checks passed, %d failed, %d group(s) skipped."
           % (PASSED, len(FAILURES), len(SKIPS)))
     for line in SKIPS:

@@ -14,8 +14,9 @@ six different responses:
                                                            retry sends them again
     AWS WAF: 202 + x-amzn-waf-action, or its CAPTCHA    -> solve, or rotate
     429 / 418                                           -> wait, same exit
-    451                                                 -> rotate: the COUNTRY
-                                                           is refused
+    451                                                 -> rotate: the site
+                                                           refuses the exit's
+                                                           jurisdiction
     403                                                 -> rotate
     anything else                                       -> retry
 
@@ -107,8 +108,11 @@ STATE_POLICY = {
     # reports exit 3 for a page that was about to come back, and sends a
     # reader to buy a proxy they do not need (§24).
     "throttled":  {"retry": True,  "solve": False, "blocked": False, "parse": False},
-    # HTTP 451: the site refuses the exit's country. Only a different exit
-    # changes that.
+    # HTTP 451, "Unavailable For Legal Reasons". NOT OBSERVED on binance.com
+    # by this repo: Binance's own API documentation names 403 (WAF), 429 and
+    # 418 and says nothing about 451. It is here because 451 is what the
+    # status means wherever it appears, and a jurisdiction refusal wants a
+    # different exit rather than a retry or a solve.
     "restricted": {"retry": True,  "solve": False, "blocked": True,  "parse": False},
     "blocked":    {"retry": True,  "solve": False, "blocked": True,  "parse": False},
     # Not JSON and not an interstitial. Worth one more try.
@@ -190,10 +194,10 @@ def refusal_advice(state: str) -> str:
     """One sentence on what changes the answer, per refusal. Kept here so
     the three engines cannot give three different pieces of advice."""
     if state == "restricted":
-        return ("binance.com refuses this exit's COUNTRY (HTTP 451). Binance "
-                "does not serve some jurisdictions, the United States among "
-                "them. Use an exit elsewhere: --proxy with a non-US exit, or "
-                "a Scraping Browser country- segment.")
+        return ("HTTP 451 means the site refuses this exit's COUNTRY. "
+                "Binance's terms exclude some jurisdictions, the United "
+                "States among them. Use an exit elsewhere: --proxy, or a "
+                "Scraping Browser country- segment.")
     if state == "challenge":
         return ("AWS WAF challenged this session. A residential exit "
                 "(--proxy) may not be challenged at all; otherwise set "
