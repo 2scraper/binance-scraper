@@ -7,11 +7,12 @@
 # three data endpoints answered a datacentre address normally when this repo
 # was written (2026-09-24); a GitHub runner is a datacentre address too.
 #
-# One thing this canary MEASURES rather than assumes: GitHub's runners are in
-# the United States, which Binance's terms exclude, and what binance.com
-# answers such an address with had not been measured when this was written.
-# If the runs come back blocked for that reason, set the proxy secret (an exit
-# in a country Binance serves) and the canary uses it with no edit here:
+# Measured on its first dispatch (2026-09-24): a GitHub-hosted runner with
+# no proxy was served in all three modes (60 of 238 adverts, 90 of 8,917
+# portfolios, 150 of 2,269 announcements, all complete). The runner's region
+# was not checked. If a later run is refused for its address, set the proxy
+# secret (an exit in a country Binance serves) and the canary uses it with
+# no edit here:
 #
 #     gh secret set BINANCE_PROXY --repo 2scraper/binance-scraper
 #

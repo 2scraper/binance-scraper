@@ -88,11 +88,10 @@ Then the rest of the presentation, in the order that matters:
 1. `python3 smoke_test.py` green, and the canary dispatched at least once.
    It runs daily with no secrets at all and is expected to be green, because
    no mode needs a credential and a green badge there is exactly the claim
-   the README makes. GitHub's runners are in the United States, which
-   Binance's terms exclude, and what binance.com answers such an address
-   with had not been measured when this was written. The canary's first
-   dispatch is that measurement. If it is refused, the canary's
-   `BINANCE_PROXY` secret (an exit elsewhere) is the fix.
+   the README makes. Its first dispatch (2026-09-24) was served in all
+   three modes from a GitHub-hosted runner with no proxy. If a later run
+   is refused for the runner's address, the canary's `BINANCE_PROXY`
+   secret (an exit elsewhere) is the fix, with no workflow edit.
 2. The repo description, homepage and topics set (see the family notes on
    what those should say).
 3. Only then the row in the org profile README — and check it with an

@@ -252,7 +252,9 @@ throttle, a WAF challenge mid-run and a bad `--pay-type`.
 
 The [canary](.github/workflows/canary.yml) runs a real 3-page scrape of each
 mode daily **with no secrets**, which is what keeps "no account needed"
-honest.
+honest. Its first dispatch (2026-09-24, a GitHub-hosted runner, no proxy)
+came back complete in all three modes: 60 of 238 adverts, 90 of 8,917
+portfolios, 150 of 2,269 announcements.
 
 ---
 
