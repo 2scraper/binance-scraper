@@ -5,7 +5,7 @@
 [![canary](https://github.com/2scraper/binance-scraper/actions/workflows/canary.yml/badge.svg)](https://github.com/2scraper/binance-scraper/actions/workflows/canary.yml)
 ![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.14-blue)
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
-![engines](https://img.shields.io/badge/engines-playwright%20%7C%20selenium%20%7C%20pyppeteer-lightgrey)
+![engines](https://img.shields.io/badge/engines-playwright%20%7C%20selenium%20%7C%20pyppeteer%20%7C%20http-lightgrey)
 ![runs without an account](https://img.shields.io/badge/all%20three%20modes-no%20account%20needed-brightgreen)
 
 Scrapes three things from [binance.com](https://www.binance.com) that its
@@ -43,6 +43,15 @@ one of those endpoints and issues every page as a same-origin `fetch()`, so
 no page is ever rendered. A full USDT/EUR buy-side order book, 10 pages,
 came back as **196 of 196 adverts** in 13 seconds with nothing configured.
 
+Which also means the data needs **no browser at all**. `http_scraper.py`
+sends the same requests with `requests` and nothing else, through the same
+loop, into the same files. Measured 2026-09-30, one 3-page run per mode
+from the same VPS: P2P 3.0 s against Playwright's 5.2 s, copy-trading 3.4 s
+against 8.8 s, announcements 2.7 s against 9.1 s, with the same rows in the
+same order. What the browser buys is the day the WAF moves in front of the
+endpoints: then only a browser engine can run its challenge or have its
+CAPTCHA solved, and the HTTP engine says so and exits 3.
+
 What the paid products buy here is insurance and scale, and the section
 below says exactly which one does what.
 
@@ -58,6 +67,14 @@ python3 -m venv venv
 
 Install **one** engine per virtualenv: the three libraries pin versions of
 their dependencies that cannot all be satisfied at once.
+
+Or no browser at all, for the HTTP engine:
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -r requirements.txt
+./venv/bin/python http_scraper.py --asset USDT --fiat EUR --pages 3
+```
 
 ## Run
 
@@ -172,11 +189,12 @@ retried, and the exit code is 5 ("the data never arrived"), not 3.
 | `playwright_scraper.py` | **Primary.** Authenticates a proxy and a remote CDP endpoint. |
 | `puppeteer_scraper.py` | pyppeteer is effectively unmaintained; here for parity. Authenticates a proxy and a CDP endpoint. `--chromium-path` points it at another browser if its own will not start. |
 | `selenium_scraper.py` | Drives the Chrome you already have. **Cannot authenticate a proxy or a remote CDP endpoint** (`debuggerAddress` is a bare `host:port`), so it refuses a credentialled `--cdp-endpoint` with exit 2. None of the modes needs either. |
+| `http_scraper.py` | **No browser**: `requests` only, the same flags minus the ones that describe a browser (`--headless`, `--cdp-endpoint`, `--fingerprint*`, `--locale`, the solver's). Proxies and rotation work. Cannot pass AWS WAF: if it answers, the run is exit 3 at once, naming the engine that can. |
 | `scraper_api_client.py` | No local browser: the 2Captcha Scraper API fetches the page. Reads `--mode announcements` only, the one endpoint with a URL. The P2P and copy-trading endpoints answer POST, and **this repo does not implement a POST through the Scraper API**. Measured: 2 pages, 100 rows, $0.0005 a page. |
 
 The fetch loop itself (landing, the WAF, retries, throttling, rotation,
-parsing) is one implementation in `page_flow.py` that all three browser
-engines drive, so they cannot disagree about a page. Each was run live on
+parsing) is one implementation in `page_flow.py` that all four engines
+drive, so they cannot disagree about a page. Each was run live on
 2026-09-24 through the same seven scenarios (P2P buy and sell, copy-trading,
 announcements, `--concurrency`, a refused `--pay-type`, `--url`) with the
 same results.

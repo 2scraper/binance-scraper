@@ -7,6 +7,20 @@ toolkit can: a patch release means **fixes**, not that every flag and
 default is frozen. A default that changes behaviour for an existing user is
 said so at the top of its release notes.
 
+## [Unreleased]
+
+### Added
+
+- `http_scraper.py`: the three modes with no browser, through the same
+  fetch loop, output and exit codes. Same flags as the browser engines
+  minus the ones that describe a browser. It sends requests' own
+  User-Agent rather than a Chrome one over a non-Chrome TLS handshake.
+  Measured 2026-09-30: identical rows to Playwright in all three modes, in
+  about a third to a half of the time. If AWS WAF answers instead of an
+  endpoint it reports exit 3 straight away, without waiting for a
+  challenge script that nothing here can run.
+- The canary runs P2P through it daily, with no browser installed.
+
 ## [0.1.1] — 2026-09-30
 
 > **A moved payload shape is no longer reported as an empty listing.** A
