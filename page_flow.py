@@ -209,6 +209,8 @@ def refusal_advice(state: str) -> str:
 
 def stop_reason_for(outcome) -> str:
     """The run's stop_reason when `outcome` is the page that ended it."""
+    if getattr(outcome, "unread", False):
+        return "parser_found_nothing"
     if getattr(outcome, "rejected", None):
         return "api_rejected"
     if getattr(outcome, "blocked_by", None):
@@ -319,7 +321,13 @@ def finish(args, query: Query, outcomes: List, stop_reason: str,
         start_url=args.url or request_for(query, 1).url,
         final_url=request_for(query, last_ok).url,
         extra={"total_results": total, "pages_available": available,
-               "query": query_summary(query)})
+               "query": query_summary(query),
+               # Empty on a healthy run. Keyed by page, because a shape can
+               # move mid-run and which pages it moved on is the point.
+               "core_field_shortfall": {
+                   str(o.page_num): o.field_shortfall
+                   for o in sorted(outcomes, key=lambda o: o.page_num)
+                   if o.field_shortfall}})
 
 
 _WAF_COOKIE_DOMAINS_RE = re.compile(r"awsWafCookieDomainList\s*=\s*\[([^\]]*)\]")
@@ -408,11 +416,17 @@ class PageOutcome:
     # The site's own count of what matched, from this page's response.
     total_available: Optional[int] = None
     pages_available: Optional[int] = None
+    # The page was served and its own total says it holds rows, and the
+    # parser read none: the payload's shape has moved (see _unread).
+    unread: bool = False
+    # Core columns filled on fewer than CORE_FIELD_FLOOR% of this page's
+    # rows, as {column: share}. Empty when the page looks as captured.
+    field_shortfall: dict = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
         return (not self.load_failed and self.blocked_by is None
-                and self.rejected is None)
+                and self.rejected is None and not self.unread)
 
 
 # The columns the site filled on EVERY record of every capture, per mode.
@@ -460,17 +474,47 @@ def land(ops, args) -> Tuple[str, Optional[str]]:
     return state, None
 
 
-def _core_field_warnings(rows: List, mode: str, page_num: int) -> None:
+def _core_field_shortfall(rows: List, mode: str, page_num: int) -> dict:
+    """{column: share} for each core column below the floor, logged.
+
+    Returned rather than only logged, so the sidecar can carry it: a warning
+    in a log is read by nobody once the run exits 0, and a renamed field
+    otherwise yields a complete-looking file with the column null on every
+    row (measured by renaming `adv.price` in a real P2P capture).
+    """
+    short = {}
     for name in CORE_FIELDS.get(mode, ()):
         if not rows:
-            return
+            return short
         filled = sum(1 for r in rows if getattr(r, name, None) not in (None, "", []))
         share = 100.0 * filled / len(rows)
         if share < CORE_FIELD_FLOOR:
+            short[name] = round(share, 1)
             log.warning("Only %.0f%% of page %d carries `%s`, against a "
                         "measured floor of %d%%. Every record of every capture "
                         "had one, so the payload shape has moved — re-run with "
                         "--dump-html.", share, page_num, name, CORE_FIELD_FLOOR)
+    return short
+
+
+def _unread(rows: List, total: Optional[int], pages: Optional[int],
+            page_num: int) -> bool:
+    """True when the site says this page holds rows and none were read.
+
+    A page past the end of a listing holds none and says so by arithmetic:
+    its own total puts it beyond the last page. A page INSIDE that range
+    with zero rows is the parser failing to find them, and reported as an
+    empty page it was exit 4, "nobody trades here", on a market the same
+    response counts 187 adverts in (measured by renaming `data` in a real
+    P2P capture). The total is read from THIS page, so a listing that
+    shrank during the run still ends as end_of_listing.
+
+    It cannot fire when the total itself has moved (None): that page is
+    indistinguishable from an empty listing, and the canary's row floor is
+    what catches it.
+    """
+    return (not rows and bool(total) and pages is not None
+            and page_num <= pages)
 
 
 def _dump(args, page_num: int, text: str) -> None:
@@ -613,7 +657,15 @@ def fetch_one_page(ops, args, pool, query: Query, page_num: int,
     if page_num == 1 and outcome.total_available is not None:
         log.info("The site reports %d match(es) — %s page(s) at this page "
                  "size.", outcome.total_available, outcome.pages_available)
-    _core_field_warnings(rows, query.mode, page_num)
+    outcome.field_shortfall = _core_field_shortfall(rows, query.mode, page_num)
+    if _unread(rows, outcome.total_available, outcome.pages_available, page_num):
+        outcome.unread = True
+        debug = _save_debug(args, page_num, text)
+        log.error("Page %d was served, and the site counts %d match(es) that "
+                  "put rows on it, but none were read — the payload's shape "
+                  "has moved. Saved to %s. This is NOT an empty listing; "
+                  "open an issue with that file.", page_num,
+                  outcome.total_available, debug)
     return outcome
 
 

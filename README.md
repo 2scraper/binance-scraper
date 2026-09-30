@@ -3,7 +3,7 @@
 [![release](https://img.shields.io/github/v/release/2scraper/binance-scraper)](https://github.com/2scraper/binance-scraper/releases)
 [![tests](https://github.com/2scraper/binance-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/binance-scraper/actions/workflows/tests.yml)
 [![canary](https://github.com/2scraper/binance-scraper/actions/workflows/canary.yml/badge.svg)](https://github.com/2scraper/binance-scraper/actions/workflows/canary.yml)
-![python](https://img.shields.io/badge/python-3.9%20%7C%203.12-blue)
+![python](https://img.shields.io/badge/python-3.9%20%E2%80%93%203.14-blue)
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 ![engines](https://img.shields.io/badge/engines-playwright%20%7C%20selenium%20%7C%20pyppeteer-lightgrey)
 ![runs without an account](https://img.shields.io/badge/all%20three%20modes-no%20account%20needed-brightgreen)
@@ -135,7 +135,27 @@ multi-page run of a live listing can see one row twice (the dedupe drops it
 and the log says so) or miss one that moved up across a page boundary after
 its page was fetched. No scraper can see the second.
 
-### 5. A refused parameter is not a block
+### 5. These endpoints are the front end's, not a published API
+
+Binance documents its official API and says undocumented interfaces are not
+something to build on. These three are exactly that, so one day a field will
+be renamed. The run is built to say so rather than to look healthy:
+
+| the shape moves | what you get |
+|---|---|
+| the row container is renamed, on page 1 | exit 5, nothing written, and the log says the page was served but **none were read**. Not exit 4: the same response still counts its rows |
+| the same, on a later page | exit 6, `stop_reason: parser_found_nothing`, that page in `pages_failed` |
+| a column is renamed | the rows are written (exit 0), and the sidecar's `core_field_shortfall` names the column and the page, e.g. `{"1": {"price": 0.0}}` |
+
+The first two rest on a measurement: on 2026-09-30 every page up to the one
+the endpoint's own total implies carried rows, on all three (P2P 228 → 12
+pages, copy-trading 9,093 → 304, announcements 2,275 → 46, the last page
+partial each time), and the page after it carried none. A page INSIDE that
+range with no rows is the parser missing them. If the total itself is
+renamed, nothing tells the page from an empty listing: that is what the
+canary's row floor is for, and it runs every day.
+
+### 6. A refused parameter is not a block
 
 The announcements endpoint takes a page size from a fixed set, and answers
 anything else (12, 25, 30, 100) with **HTTP 400 and an empty body**. Classify
@@ -214,8 +234,8 @@ Nothing here integrates a competitor.
 | 2 | bad usage, including a `--pay-type` the site does not offer |
 | 3 | blocked: AWS WAF, a 403 or a 451, distinct from an empty listing |
 | 4 | zero rows: the listing has nothing in it |
-| 5 | the data never arrived: a timeout, a dead proxy, a refused parameter, a remote API error |
-| 6 | partial: some pages came back and some did not |
+| 5 | the data never arrived: a timeout, a dead proxy, a refused parameter, a remote API error, or page 1 served in a shape the parser cannot read (see 5 above) |
+| 6 | partial: some pages came back and some did not, or a later page's shape moved (`stop_reason: parser_found_nothing`) |
 
 **A run that finds nothing writes nothing**, so a failure never replaces last
 night's good output with `[]`. `--allow-empty` is the opt-out.

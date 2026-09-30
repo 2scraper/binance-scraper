@@ -83,7 +83,8 @@ jobs:
             0) ;;
             3) echo "::error::Blocked. If the log names aws-waf, the WAF has moved in front of the data endpoints, which is the README's central claim failing. If it names http-403 or geo-451, the runner's address was refused: set the BINANCE_PROXY secret (see the header)."; exit 1 ;;
             4) echo "::error::Zero rows from a listing that is never empty. The endpoint's shape has moved; see canary_dump.json."; exit 1 ;;
-            5) echo "::error::The data never arrived, or the endpoint REFUSED the parameters (the log names the site's own complaint)."; exit 1 ;;
+            5) echo "::error::The data never arrived, the endpoint REFUSED the parameters (the log names the site's own complaint), or page 1 was served and none of its rows could be read (the log says 'none were read': the endpoint's shape has moved)."; exit 1 ;;
+            6) echo "::error::Partial. If the sidecar's stop_reason is parser_found_nothing, the endpoint's shape moved part-way through the run; see canary_dump.json."; exit 1 ;;
             *) echo "::error::Unexpected exit $code."; exit 1 ;;
           esac
 
@@ -103,6 +104,11 @@ jobs:
               problems.append("%d rows, floor %d" % (len(rows), floor))
           if not meta.get("total_results"):
               problems.append("no total_results in the sidecar")
+          # A renamed field writes its rows with the column null and exits 0,
+          # so the exit code cannot catch it; the sidecar says it.
+          if meta.get("core_field_shortfall"):
+              problems.append("the payload's shape has moved: core columns "
+                              "missing %r" % meta["core_field_shortfall"])
           if {r["mode"] for r in rows} != {mode}:
               problems.append("rows name modes %r" % {r["mode"] for r in rows})
           pairs = [(r["page"], r["position"]) for r in rows]

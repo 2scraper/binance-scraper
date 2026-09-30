@@ -7,6 +7,29 @@ toolkit can: a patch release means **fixes**, not that every flag and
 default is frozen. A default that changes behaviour for an existing user is
 said so at the top of its release notes.
 
+## [Unreleased]
+
+> **A moved payload shape is no longer reported as an empty listing.** A
+> page the endpoint served, whose own total says it holds rows, and from
+> which no row could be read, used to end the run as exit 4 ("the listing
+> has nothing in it"). It is now exit 5 on page 1 and exit 6 on a later
+> page, with `stop_reason: parser_found_nothing`. Measured by renaming the
+> row container in a real P2P capture that still counted 187 adverts.
+
+### Changed
+
+- The sidecar carries `core_field_shortfall`: for each page, the core
+  columns filled on fewer than 99% of its rows. `{}` on a healthy run. A
+  renamed field used to write a complete-looking file with the column null
+  on every row and one warning in the log; the daily canary now fails on it.
+- The canary names a moved shape on exit 5 and 6.
+- CI tests Python 3.9 and 3.14 (was 3.9 and 3.12). 3.9 stays as the floor.
+- The AWS WAF token cookie is set on the domain the challenge page lists in
+  `awsWafCookieDomainList`, or on the page's own host when it lists none,
+  rather than always on the registrable domain.
+- `engine-smoke` checks that the engine imports, rather than grepping the
+  suite's output for a phrase it never printed.
+
 ## [0.1.0] — 2026-09-24
 
 First release. Three modes over binance.com's own JSON endpoints, three
