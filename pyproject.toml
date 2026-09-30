@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "binance-scraper"
-version = "0.1.1"
+version = "0.2.0"
 description = "binance.com scraper: P2P adverts, Futures copy-trading lead portfolios and announcements, from the site's own JSON endpoints (Playwright, Selenium or pyppeteer)."
 readme = "README.md"
 license = "MIT"
