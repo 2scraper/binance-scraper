@@ -604,15 +604,32 @@ def check_the_shared_loop_end_to_end():
     equal("...no search page was fetched", [p for p in ops.fetches if p != 0], [])
 
 
+def _copy_shrunk_to(total):
+    """The captured past-the-end copy-trading page, with the total a listing
+    that SHRANK to `total` states. Measured 2026-09-30 on all three
+    endpoints: every page up to the one the total implies carries rows
+    (P2P 228 -> 12 pages, copy-trading 9,093 -> 304, announcements 2,275 ->
+    46, the last page partial each time) and the next one carries none. So
+    an empty page whose OWN total still covers it does not happen on a
+    healthy response — the listing ending is a page past its own total."""
+    payload = copy.deepcopy(FIXTURES["copy_past_the_end"])
+    payload["data"]["total"] = total
+    return json.dumps(payload)
+
+
 def check_a_multi_page_run_merges_in_page_order_and_ends_on_data():
     import product_parser as P
     q = P.Query("copytrading")
     page2 = copy.deepcopy(FIXTURES["copy_30d_roi"])
     for i, rec in enumerate(page2["data"]["list"]):
         rec["leadPortfolioId"] = "90000000000000000%02d" % i
+    # Page 3 of a listing that had shrunk to two pages of 30 by the time
+    # page 3 was asked for. This used the capture of page 999 with its total
+    # of 8,921 untouched, which says page 3 SHOULD hold rows: since the
+    # shape-moved check, that reads as a parser failure, which is right.
     answers = {1: [(200, fx("copy_30d_roi"), None)],
                2: [(200, json.dumps(page2), None)],
-               3: [(200, fx("copy_past_the_end"), None)]}
+               3: [(200, _copy_shrunk_to(60), None)]}
     rc, meta, rows, ops = _run(answers, pages=5, query=q)
     equal("an empty page 3 of a planned 5 ends the run: exit 0", rc, 0)
     equal("...as a complete run", meta["status"], "complete")
@@ -620,10 +637,61 @@ def check_a_multi_page_run_merges_in_page_order_and_ends_on_data():
     equal("...pages 1-3 fetched, not 4-5", ops.fetches, [1, 2, 3])
     equal("rows are in page order", [r["page"] for r in rows], [1, 1, 1, 2, 2, 2])
     dup = {1: [(200, fx("copy_30d_roi"), None)], 2: [(200, fx("copy_30d_roi"), None)],
-           3: [(200, fx("copy_past_the_end"), None)]}
+           3: [(200, _copy_shrunk_to(60), None)]}
     rc, meta, rows, ops = _run(dup, pages=3, query=q)
     equal("a row seen twice across pages (a live listing moving) is kept once",
           len(rows), 3)
+    equal("...and the run is still complete", (rc, meta["status"]), (0, "complete"))
+
+
+def check_a_moved_payload_shape_is_not_an_empty_listing():
+    """The endpoints are undocumented, so the shape WILL move one day. Both
+    ways it can move were silent before: a renamed container parsed to zero
+    rows and reported exit 4, "nobody trades here", on a response counting
+    the adverts; a renamed field wrote a complete file with the column null
+    on every row and one warning in a log. Measured by renaming each in a
+    real capture."""
+    import product_parser as P
+    renamed = copy.deepcopy(FIXTURES["p2p_usdt_eur_buy"])
+    renamed["items"] = renamed.pop("data")
+    rc, meta, rows, ops = _run({1: [(200, json.dumps(renamed), None)]}, pages=1)
+    equal("a renamed row container on page 1 is NOT an empty listing (exit 4): "
+          "exit 5, nothing concluded", rc, 5)
+    equal("...and the previous good output is not replaced", rows, None)
+    equal("...and the page is not re-fetched (the same shape comes back)",
+          ops.fetches, [1])
+
+    q = P.Query("copytrading")
+    page2 = copy.deepcopy(FIXTURES["copy_30d_roi"])
+    page2["data"]["items"] = page2["data"].pop("list")
+    rc, meta, rows, ops = _run({1: [(200, fx("copy_30d_roi"), None)],
+                                2: [(200, json.dumps(page2), None)]},
+                               pages=2, query=q)
+    equal("a shape that moves on page 2: exit 6, partial", (rc, meta["status"]),
+          (6, "partial"))
+    equal("...named by its own stop_reason", meta["stop_reason"],
+          "parser_found_nothing")
+    equal("...with the page that moved listed", meta["pages_failed"], [2])
+
+    unpriced = copy.deepcopy(FIXTURES["p2p_usdt_eur_buy"])
+    for rec in unpriced["data"]:
+        rec["adv"]["unitPrice"] = rec["adv"].pop("price")
+    rc, meta, rows, ops = _run({1: [(200, json.dumps(unpriced), None)]}, pages=1)
+    equal("a renamed FIELD still writes its rows (exit 0: the listing was read)",
+          rc, 0)
+    equal("...and the sidecar says which column went missing, on which page",
+          meta["core_field_shortfall"], {"1": {"price": 0.0}})
+
+    rc, meta, rows, ops = _run({1: [(200, _p2p_page(1), None)]}, pages=1)
+    equal("a healthy run's sidecar carries an EMPTY shortfall (a key the "
+          "canary can assert on)", meta["core_field_shortfall"], {})
+
+    import page_flow
+    equal("a page past its OWN total is the end of the listing, not a moved shape",
+          page_flow._unread([], 228, 12, 13), False)
+    equal("...a page inside it with no rows is", page_flow._unread([], 228, 12, 12), True)
+    equal("...and with no total at all nothing can be told apart",
+          page_flow._unread([], None, None, 1), False)
 
 
 def check_every_engine_implements_the_operations_page_flow_uses():
