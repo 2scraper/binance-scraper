@@ -7,7 +7,7 @@ toolkit can: a patch release means **fixes**, not that every flag and
 default is frozen. A default that changes behaviour for an existing user is
 said so at the top of its release notes.
 
-## [Unreleased]
+## [0.1.1] — 2026-09-30
 
 > **A moved payload shape is no longer reported as an empty listing.** A
 > page the endpoint served, whose own total says it holds rows, and from
