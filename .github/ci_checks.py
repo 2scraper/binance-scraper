@@ -34,7 +34,7 @@ REPO = Path(__file__).resolve().parent.parent
 ENGINE_LIBS = ("playwright", "pyppeteer", "selenium", "webdriver_manager")
 
 CLIS = ["playwright_scraper.py", "puppeteer_scraper.py", "selenium_scraper.py",
-        "scraper_api_client.py", "fingerprint_client.py", "env_config.py",
+        "http_scraper.py", "scraper_api_client.py", "fingerprint_client.py", "env_config.py",
         "diff_runs.py"]
 
 # One real run per mode: three row classes, three samples.

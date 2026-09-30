@@ -77,9 +77,15 @@ def fx(name) -> str:
 
 
 ENGINES = ("playwright_scraper", "selenium_scraper", "puppeteer_scraper")
+# The browserless engine. Kept out of ENGINES, whose checks are about a
+# browser (its flags, its fetch() JavaScript), and added by name to every
+# check that is about the shared loop, the log or the imports.
+HTTP_ENGINE = "http_scraper"
+ALL_ENGINES = ENGINES + (HTTP_ENGINE,)
 DRIVER_IMPORTS = {"playwright_scraper": "playwright",
                   "selenium_scraper": "selenium",
-                  "puppeteer_scraper": "pyppeteer"}
+                  "puppeteer_scraper": "pyppeteer",
+                  "http_scraper": "requests"}
 
 
 def _import_engine(name):
@@ -644,6 +650,119 @@ def check_a_multi_page_run_merges_in_page_order_and_ends_on_data():
     equal("...and the run is still complete", (rc, meta["status"]), (0, "complete"))
 
 
+class _FakeResponse:
+    def __init__(self, status, text, waf=None):
+        self.status_code, self.text = status, text
+        self.headers = {"x-amzn-waf-action": waf} if waf else {}
+
+
+def _http_run(answer, pages=1, query=None, **extra):
+    """Drive http_scraper through the shared loop with requests stubbed:
+    `answer(method, url, body)` returns a _FakeResponse or raises."""
+    import http_scraper
+    import page_flow
+    import requests
+    from product_parser import Query
+    calls, waits = [], []
+    real_request, real_sleep = requests.Session.request, http_scraper.time.sleep
+
+    def fake_request(self, method, url, data=None, headers=None, timeout=None, **kw):
+        calls.append((method, url))
+        check("every request is bounded by a timeout", timeout is not None)
+        return answer(method, url, data)
+
+    requests.Session.request = fake_request
+    http_scraper.time.sleep = lambda s: waits.append(s)
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            args = types.SimpleNamespace(
+                pages=pages, retries=2, retry_delay=0, delay=0,
+                proxy_block_retries=2, out=os.path.join(tmp, "out"), format="json",
+                allow_empty=False, dump_html=None, url=None, cdp_endpoint=None,
+                concurrency=1)
+            for k, v in extra.items():
+                setattr(args, k, v)
+            q = query or Query("p2p", fiat="EUR")
+            rc = page_flow.run_pages(
+                lambda: http_scraper._Ops(args, None).open(), lambda o: o.close(),
+                lambda nums: http_scraper._fetch_pages_concurrently(args, None, q, nums, 2),
+                args, None, q, 1, http_scraper._mask_credentials)
+            meta_path = args.out + ".meta.json"
+            meta = json.load(open(meta_path)) if os.path.exists(meta_path) else None
+    finally:
+        requests.Session.request = real_request
+        http_scraper.time.sleep = real_sleep
+    return rc, meta, calls, waits
+
+
+def check_the_http_engine_drives_the_shared_loop():
+    """The HTTP engine is page_flow's loop over requests, so the same answers
+    must give the same exit codes the browser engines give. requests is the
+    one library the offline suite always has, so this never skips."""
+    if _import_engine(HTTP_ENGINE) is None:
+        return
+    from product_parser import ORIGIN_URL, Query
+
+    def served(method, url, body):
+        if url == ORIGIN_URL:
+            return _FakeResponse(200, fx("ann_new_listings"))
+        if "copy-trade" in url:
+            return _FakeResponse(200, fx("copy_30d_roi"))
+        return _FakeResponse(200, _p2p_page(1))
+
+    rc, meta, calls, waits = _http_run(served)
+    equal("http: a served listing is exit 0, complete", (rc, meta["status"]),
+          (0, "complete"))
+    equal("...landing on the GET endpoint, then POSTing the search",
+          [m for m, _ in calls], ["GET", "POST"])
+
+    def challenged(method, url, body):
+        return _FakeResponse(202, "", "challenge")
+
+    rc, meta, calls, waits = _http_run(challenged)
+    equal("http: an AWS WAF challenge is exit 3, blocked", rc, 3)
+    # Any pause at all is the settle poll: --delay and --retry-delay are 0
+    # here. Measured by a control: with the wait, the first poll re-read the
+    # empty 202 body without its status, called it `unknown`, and the run
+    # became exit 5 "never arrived" for a page that was plainly blocked.
+    check("...without the browser engines' wait for a script to run "
+          "(nothing here runs it)", not any(w > 0 for w in waits),
+          "waited %r" % waits)
+
+    def dead_proxy(method, url, body):
+        import requests
+        raise requests.exceptions.ProxyError(
+            "Unable to connect to proxy http://u:supersecret@exit.example:2334")
+
+    rc, meta, calls, waits = _http_run(dead_proxy)
+    equal("http: a dead proxy is exit 5, the data never arrived", rc, 5)
+    import http_scraper
+    check("...recognised as a PROXY failure, not a timeout",
+          http_scraper._proxy_failure("ProxyError: Unable to connect to proxy") != "")
+    ops = http_scraper._Ops(types.SimpleNamespace(), None).open()
+    try:
+        import requests
+        real = requests.Session.request
+        requests.Session.request = lambda *a, **k: dead_proxy(None, None, None)
+        status, text, waf, error = ops.fetch(
+            __import__("product_parser").request_for(Query("p2p", fiat="EUR"), 1))
+    finally:
+        requests.Session.request = real
+        ops.close()
+    check("...and its error text carries no password", "supersecret" not in (error or ""),
+          error)
+    check("...but keeps the exit", "exit.example:2334" in (error or ""), error)
+
+    def ann_pages(method, url, body):
+        if url == ORIGIN_URL:
+            return _FakeResponse(200, fx("ann_new_listings"))
+        return _FakeResponse(200, fx("ann_new_listings"))
+
+    rc, meta, calls, waits = _http_run(ann_pages, pages=1,
+                                       query=Query("announcements"))
+    equal("http: announcements, a GET listing, exit 0", rc, 0)
+
+
 def check_a_moved_payload_shape_is_not_an_empty_listing():
     """The endpoints are undocumented, so the shape WILL move one day. Both
     ways it can move were silent before: a renamed container parsed to zero
@@ -708,7 +827,7 @@ def check_every_engine_implements_the_operations_page_flow_uses():
     check("...and the fake driver this suite uses implements every one",
           all(hasattr(_FakeOps({}), name) for name in used),
           repr(sorted(n for n in used if not hasattr(_FakeOps({}), n))))
-    for module in ENGINES:
+    for module in ALL_ENGINES:
         path = os.path.join(HERE, module + ".py")
         tree = ast.parse(open(path, encoding="utf-8").read())
         ops_cls = next((n for n in tree.body
@@ -876,7 +995,7 @@ def check_shared_calls_bind_against_the_real_signature():
                "output_writer": output_writer, "captcha_solver": captcha_solver,
                "proxy_pool": proxy_pool}
     bound = 0
-    for module in ENGINES + ("scraper_api_client", "diff_runs", "page_flow"):
+    for module in ALL_ENGINES + ("scraper_api_client", "diff_runs", "page_flow"):
         tree = ast.parse(open(os.path.join(HERE, module + ".py"), encoding="utf-8").read())
         local_names = {n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
         direct = {}
@@ -974,10 +1093,34 @@ def check_engine_flag_sets():
           "--chromium-path" in sets["puppeteer_scraper"])
 
 
+# The flags that describe a browser, and so are absent from the HTTP engine.
+# The list IS the documentation (§17): the check fails if the HTTP engine
+# gains one, loses a shared one, or if one of these leaves the browser
+# engines while still listed here.
+BROWSER_ONLY_FLAGS = {"--headless", "--headful", "--cdp-endpoint", "--locale",
+                      "--fingerprint", "--fp-tags", "--fp-country",
+                      "--twocaptcha-key", "--captcha-api", "--solve-captcha",
+                      "--min-score"}
+
+
+def check_http_engine_flags_are_the_browser_ones_minus_the_browser():
+    pw = _argparse_flags("playwright_scraper")
+    http = _argparse_flags(HTTP_ENGINE)
+    check("every browser-only flag is still a browser engine's flag",
+          BROWSER_ONLY_FLAGS <= pw, "gone from playwright: %s"
+          % sorted(BROWSER_ONLY_FLAGS - pw))
+    check("the HTTP engine defines exactly the rest",
+          http == pw - BROWSER_ONLY_FLAGS,
+          "only in http: %s; missing from http: %s"
+          % (sorted(http - (pw - BROWSER_ONLY_FLAGS)),
+             sorted((pw - BROWSER_ONLY_FLAGS) - http)))
+    check("...which includes every query flag", BINANCE_FLAGS <= http)
+
+
 def check_banned_and_removed_flags():
     """Scoped to the engines. `--country` is banned: it could disagree with
     the --url, and a P2P query's country is its --fiat."""
-    for module in ENGINES:
+    for module in ALL_ENGINES:
         source = open(os.path.join(HERE, module + ".py"), encoding="utf-8").read()
         for flag in ("--antidetect", "--country", "--country-code"):
             check("%s does not define %s" % (module, flag), '"%s"' % flag not in source)
@@ -1309,7 +1452,7 @@ def check_fetch_js_is_one_request_in_three_dialects():
 
 
 def check_credentials_never_reach_a_log():
-    for module in ENGINES:
+    for module in ALL_ENGINES:
         engine = _import_engine(module)
         if engine is None:
             continue

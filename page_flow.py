@@ -457,8 +457,10 @@ def land(ops, args) -> Tuple[str, Optional[str]]:
     state = classify(ops.document_text(), status, ORIGIN_URL, waf)
     if state == "challenge":
         # The WAF's challenge action computes a token and reloads the page
-        # by itself, so let it run before paying for anything.
-        waited = 0
+        # by itself, so let it run before paying for anything. Only a
+        # browser runs it: an engine without one (`runs_scripts` False)
+        # would spend the wait re-reading a document that cannot change.
+        waited = 0 if getattr(ops, "runs_scripts", True) else CHALLENGE_SETTLE_MS
         while waited < CHALLENGE_SETTLE_MS and state == "challenge":
             ops.wait_ms(CHALLENGE_POLL_MS)
             waited += CHALLENGE_POLL_MS
