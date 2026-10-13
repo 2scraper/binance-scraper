@@ -290,7 +290,7 @@ def parse_args(argv=None):
     p.add_argument("--concurrency", type=int, default=1, metavar="N",
                    help="Fetch pages through N parallel workers (default 1). "
                         "Each worker holds its own session and proxy exit.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page on a transport failure (default 3). "
                         "The pause doubles each time. A request the endpoint "
                         "REFUSED is not retried: its parameters would be "
