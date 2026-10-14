@@ -164,10 +164,9 @@ Two things about running this live that are specific to Binance:
 * **No mode needs an exit, a key or an account.** The endpoints answered a
   datacentre VPS normally, so "it worked from my laptop" is reproducible
   here in a way it is not on most sibling repos.
-* **Binance's terms exclude some jurisdictions, the United States among
-  them** (binance.us is a separate exchange). What an address there is
-  answered with has not been measured by this repo. If a run from one is
-  refused, that is the terms, not a bug.
+* **HTTP 451 has not been observed.** The daily canary is served from a
+  GitHub-hosted runner with no proxy. If a run is refused with 451, record
+  the exit's country in the issue.
 
 **Run more than the primary engine.** "Mirror them exactly" is a design
 rule, not a verification. The fetch loop is shared (`page_flow.run_pages`),

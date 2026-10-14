@@ -371,6 +371,42 @@ def check_url_and_flags_together_are_refused():
     equal("flag defaults apply without --url", (q.time_range, q.sort_by, q.order),
           ("30D", "roi", "desc"))
 
+    # BINANCE_URL from .env is a DEFAULT. A --mode or a query flag the user
+    # typed wins over it instead of being refused as a conflict with a URL
+    # they never typed. A copied example used to break every README example
+    # that builds its query from flags.
+    def built(**kw):
+        for k, v in kw.items():
+            setattr(args, k, v)
+        errors.clear()
+        try:
+            q = page_flow.build_query(args, err)
+        except SystemExit:
+            return ("refused", errors[0] if errors else "")
+        return (q.mode, q.fiat)
+
+    env_url = "https://p2p.binance.com/en/trade/all-payments/USDT?fiat=EUR"
+    got = built(url=env_url, typed_url=None, mode="announcements")
+    equal("an ENVIRONMENT url gives way to a typed --mode", got[0], "announcements")
+    equal("...and to a typed query flag",
+          built(url=env_url, typed_url=None, mode=None, fiat="TRY"), ("p2p", "TRY"))
+    equal("...and is used when nothing was typed",
+          built(url=env_url, typed_url=None, mode=None, fiat=None), ("p2p", "EUR"))
+    args.url = args.typed_url = env_url
+    args.fiat = "TRY"
+    errors.clear()
+    try:
+        page_flow.build_query(args, err)
+    except SystemExit:
+        pass
+    check("a TYPED --url with --fiat is still refused",
+          errors and "--fiat" in errors[0], repr(errors))
+    for engine in list(ENGINES) + ["http_scraper"]:
+        src = open(os.path.join(HERE, engine + ".py"), encoding="utf-8").read()
+        i, j = src.find("args.typed_url = args.url"), src.find("env_config.apply(args)")
+        check("%s records the typed --url BEFORE .env fills it" % engine,
+              0 <= i < j, "typed_url at %d, apply at %d" % (i, j))
+
 
 # ---------------------------------------------------------------------------
 # Page state: what the site answered with
@@ -455,9 +491,23 @@ def check_state_policy():
           "COUNTRY" in F.refusal_advice("restricted"))
     check("...and claims nothing about what binance.com has been SEEN doing",
           "answers" not in F.refusal_advice("restricted"))
-    check("a CDP 401 is explained as expired credentials, not a held pid",
-          "expired" in F.cdp_connect_hint("WebSocket error: 401 Unauthorized")
-          and "pid" not in F.cdp_connect_hint("401 Unauthorized"))
+    # Nobody has seen binance.com answer 451, and the daily canary is served
+    # from a GitHub-hosted runner with no proxy. Advice that names a country
+    # to avoid would send a reader to buy an exit over a guess.
+    check("451's advice says it has not been observed, and names no country to avoid",
+          "not been observed" in F.refusal_advice("restricted")
+          and "United States" not in F.refusal_advice("restricted"))
+    for doc in ("README.md", "TROUBLESHOOTING.md", "CONTRIBUTING.md", ".env.example",
+                os.path.join(".github", "ISSUE_TEMPLATE", "bug_report.yml")):
+        path = os.path.join(HERE, doc)
+        if os.path.exists(path):
+            check("%s does not repeat the unmeasured US refusal" % doc,
+                  "United States" not in open(path, encoding="utf-8").read())
+    hint = F.cdp_connect_hint("WebSocket error: 401 Unauthorized")
+    check("a CDP 401 is explained as refused credentials, not a held pid",
+          "refused" in hint and "pid" not in F.cdp_connect_hint("401 Unauthorized"))
+    check("...without claiming credentials last a fixed time",
+          "about a day" not in hint)
     check("...and a 500 as a held pid", "pid" in F.cdp_connect_hint("HTTP 500"))
     waf = fx("waf_captcha_chromium")
     check("the captured CAPTCHA page names its cookie domains (not vacuous)",
@@ -608,6 +658,59 @@ def check_the_shared_loop_end_to_end():
     rc, meta, rows, ops = _run({}, query=P.Query("p2p", fiat="EUR", pay_types=("SEPA Instant",)))
     equal("an unknown --pay-type: exit 2 before any search", rc, 2)
     equal("...no search page was fetched", [p for p in ops.fetches if p != 0], [])
+
+
+class _PaidCaptchaOps(_FakeOps):
+    """A landing that is a real AWS WAF CAPTCHA and stays one after a
+    "successful" solve, with a solver that reports success every time. The
+    count of purchases is the only thing being measured."""
+
+    def __init__(self, pool=None):
+        _FakeOps.__init__(self, {}, landing=fx("waf_captcha_chromium"))
+        self.pool = pool
+
+    def goto(self, url):
+        self.gotos += 1
+        return 405, "captcha"
+
+    def solve_captcha(self):
+        self.solves += 1
+        return True
+
+
+def check_the_solve_allowance_is_per_page_not_per_landing():
+    """A refused page lands again after every block-retry and every rotation.
+    The allowance must survive those: one page, at most SOLVES_PER_PAGE
+    purchases, however many times the loop lands. With the allowance kept
+    inside each landing this bought 2 solves with no pool and 4 with a
+    3-exit pool."""
+    import page_flow
+    from product_parser import Query
+    import proxy_pool
+    check("the CAPTCHA landing really classifies as a challenge (not vacuous)",
+          page_flow.classify(fx("waf_captcha_chromium"), 405,
+                             page_flow.ORIGIN_URL, "captcha") == "challenge")
+    for label, pool, block_retries in (
+            ("no pool", None, 3),
+            ("3-exit pool", proxy_pool.ProxyPool(
+                ["http://10.0.0.1:1", "http://10.0.0.2:2", "http://10.0.0.3:3"]), 3)):
+        args = types.SimpleNamespace(
+            pages=1, retries=3, retry_delay=0, delay=0,
+            proxy_block_retries=block_retries, out="unused", format="json",
+            allow_empty=False, dump_html=None, url=None, cdp_endpoint=None,
+            concurrency=1)
+        ops = _PaidCaptchaOps(pool)
+        with tempfile.TemporaryDirectory() as tmp:
+            args.out = os.path.join(tmp, "out")
+            outcome = page_flow.fetch_one_page(ops, args, pool,
+                                               Query("p2p", fiat="EUR"), 1)
+        check("solve allowance, %s: the page was refused and the loop landed "
+              "more than once (not vacuous)" % label,
+              outcome.blocked_by == "aws-waf" and ops.gotos > 1,
+              "blocked_by=%r gotos=%d" % (outcome.blocked_by, ops.gotos))
+        equal("solve allowance, %s: one page buys at most SOLVES_PER_PAGE "
+              "solves across every landing" % label,
+              ops.solves, page_flow.SOLVES_PER_PAGE)
 
 
 def _copy_shrunk_to(total):
@@ -893,6 +996,116 @@ def check_csv_and_json_writers():
         loaded = json.load(open(json_path, encoding="utf-8"))
         check("a list column stays a real list in JSON", isinstance(loaded[0]["pay_methods"], list))
         check("an id past 2**53 stays a string in JSON", isinstance(loaded[0]["sku"], str))
+
+
+def check_writes_are_atomic_and_keep_the_umask_mode():
+    """A failure part-way through a write must leave the previous file intact
+    and no temp file behind. Before the atomic writer, a failure inside
+    json.dump turned a good 786-byte out.json into 13 bytes of invalid JSON.
+    And the temp file's 0600 must not become the output's mode."""
+    import output_writer as O
+    import product_parser as P
+    rows = P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR"), 1)
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        O.finish_run(rows, prefix, "both", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u", mode="p2p")
+        before = {ext: open(prefix + ext, encoding="utf-8").read()
+                  for ext in (".json", ".csv", ".meta.json")}
+
+        class Boom(Exception):
+            pass
+
+        def exploding_dump(obj, f, **kw):
+            f.write("[{\"partial\": ")
+            raise Boom()
+        real_dump = O.json.dump
+        O.json.dump = exploding_dump
+        try:
+            for name, call in (
+                    ("write_json", lambda: O.write_json(rows, prefix + ".json")),
+                    ("write_run_meta", lambda: O.write_run_meta(prefix, {"status": "x"}))):
+                try:
+                    call()
+                except Boom:
+                    pass
+        finally:
+            O.json.dump = real_dump
+        real_writerow = csv.DictWriter.writerow
+
+        def exploding_writerow(self, row):
+            raise Boom()
+        csv.DictWriter.writerow = exploding_writerow
+        try:
+            try:
+                O.write_csv(rows, prefix + ".csv", row_cls=O.P2PAd)
+            except Boom:
+                pass
+        finally:
+            csv.DictWriter.writerow = real_writerow
+        for ext, good in before.items():
+            equal("a write that fails part-way leaves the previous %s intact" % ext,
+                  open(prefix + ext, encoding="utf-8").read(), good)
+        equal("...and leaves no temporary file behind",
+              sorted(os.listdir(tmp)), ["out.csv", "out.json", "out.meta.json"])
+
+        old_umask = os.umask(0o022)
+        try:
+            for umask, want in ((0o022, 0o644), (0o002, 0o664), (0o077, 0o600)):
+                os.umask(umask)
+                path = os.path.join(tmp, "new_%o.json" % umask)
+                O.write_json(rows, path)
+                equal("a NEW output under umask %03o is %o, as open() would make it"
+                      % (umask, want), os.stat(path).st_mode & 0o777, want)
+            os.umask(0o022)
+            os.chmod(prefix + ".json", 0o640)
+            O.write_json(rows, prefix + ".json")
+            equal("an EXISTING output keeps its own mode",
+                  os.stat(prefix + ".json").st_mode & 0o777, 0o640)
+        finally:
+            os.umask(old_umask)
+
+
+def check_csv_cells_are_formula_escaped():
+    """Advertiser nicknames, portfolio names and announcement titles are
+    third-party text. A cell starting with = + - @ or a control character is
+    run by a spreadsheet; CSV gets an apostrophe, JSON keeps the bytes."""
+    import output_writer as O
+    import product_parser as P
+    rows = P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR"), 1)[:2]
+    rows[0].title = '=HYPERLINK("x")'
+    rows[0].pay_methods = ["-cmd", "ok"]
+    rows[1].title = "@SUM(1)"
+    rows[1].price = -5.0
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        O.finish_run(rows, prefix, "both", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u", mode="p2p",
+                     extra={"total_results": 2})
+        reader = list(csv.DictReader(open(prefix + ".csv", encoding="utf-8")))
+        equal("a formula-shaped title is escaped in CSV", reader[0]["title"],
+              '\'=HYPERLINK("x")')
+        equal("...and a joined list cell too (escaped AFTER serialising)",
+              reader[0]["pay_methods"], "'-cmd | ok")
+        equal("...and @", reader[1]["title"], "'@SUM(1)")
+        equal("a negative NUMBER is left numeric", reader[1]["price"], "-5.0")
+        loaded = json.load(open(prefix + ".json", encoding="utf-8"))
+        equal("JSON keeps the site's bytes", (loaded[0]["title"], loaded[0]["pay_methods"]),
+              ('=HYPERLINK("x")', ["-cmd", "ok"]))
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        equal("the sidecar declares csv_cells_escaped", meta.get("csv_cells_escaped"), 3)
+        equal("...beside the caller's own extra", meta.get("total_results"), 2)
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        O.finish_run(rows, prefix, "both", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u", mode="p2p",
+                     extra={"csv_cells_escaped": "caller"})
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        equal("housekeeping merges UNDER the caller's extra, never over it",
+              meta.get("csv_cells_escaped"), "caller")
 
 
 def check_exit_codes():
@@ -1207,7 +1420,9 @@ def check_dockerfile_copies_everything_the_entrypoint_imports():
 def check_env_example_documents_exactly_what_the_loader_reads():
     import env_config
     text = open(os.path.join(HERE, ".env.example"), encoding="utf-8").read()
-    documented = set(re.findall(r"^([A-Z][A-Z0-9_]+)=", text, re.M))
+    # A commented-out example (`# BINANCE_URL=...`) documents the variable
+    # without setting it.
+    documented = set(re.findall(r"^(?:# )?([A-Z][A-Z0-9_]+)=", text, re.M))
     read = set(env_config.ENV_KEYS)
     equal("the example and the loader name the same variables",
           sorted(documented), sorted(read))

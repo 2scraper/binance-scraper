@@ -657,6 +657,9 @@ def parse_args(argv=None):
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args(argv)
+    # Before .env fills it: a URL from the environment is a default,
+    # and must not refuse a --mode or a query flag the user typed.
+    args.typed_url = args.url
     env_config.apply(args)
     args.query = page_flow.build_query(args, p.error)
     args.mode = args.query.mode

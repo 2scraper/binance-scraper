@@ -25,8 +25,10 @@ The log names what refused the run:
 * **`http-403`** — the site refused the address. Binance's API documentation
   uses 403 for a WAF rule, including a rate-limit violation. Slow down
   (`--delay`), or use a different exit.
-* **`geo-451`** — the exit's country is refused. Binance's terms exclude some
-  jurisdictions, the United States among them.
+* **`geo-451`** — HTTP 451, a refusal for legal reasons. It has not been
+  observed on binance.com in testing (the daily canary is served from a
+  GitHub-hosted runner with no proxy), so please open an issue with the
+  sidecar's `stop_reason` and the exit's country.
 
 A `<out>_page<N>_debug.html` beside the output holds what came back.
 

@@ -48,6 +48,9 @@ dumps/
 *.html.page*
 *.json.page*
 *.page[0-9]*
+# A capture saved by hand at the repo root (`--dump-html dump.html`). The
+# repo ships no HTML of its own.
+/*.html
 
 # --- captures kept for parser work ---------------------------------------
 # The smoke suite's fixtures are committed (trimmed, in fixtures_generated.json);

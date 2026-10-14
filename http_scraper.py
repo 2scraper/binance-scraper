@@ -321,6 +321,9 @@ def parse_args(argv=None):
                         "success as well as failure. It is JSON; the flag "
                         "keeps the family's name.")
     args = p.parse_args(argv)
+    # Before .env fills it: a URL from the environment is a default,
+    # and must not refuse a --mode or a query flag the user typed.
+    args.typed_url = args.url
     env_config.apply(args)
     # Read by the shared loop, which serves the browser engines too. There is
     # no remote browser here.
