@@ -15,8 +15,62 @@ said so at the top of its release notes.
 > exit 3 or 4 with a 39-byte "capture", in tens of milliseconds. If a
 > script of yours passes 0, pass **1**: the flag counts ATTEMPTS, so 1 means
 > "try once and do not retry".
+>
+> **Behaviour change:** a page now buys at most one CAPTCHA solve in total,
+> across every block-retry and exit rotation. It used to be one per
+> LANDING, so a refused page could buy 2 AWS WAF solves with no proxy pool
+> and 4 with a 3-exit pool. A page whose CAPTCHA survives that one solve is
+> reported blocked (exit 3) sooner and for less.
+>
+> **Behaviour change:** CSV cells that start with `=`, `+`, `-`, `@`, a
+> tab or a line break now carry a leading apostrophe, so a spreadsheet
+> reads them as text. JSON is unchanged; the sidecar's `csv_cells_escaped`
+> says how many cells differ.
+>
+> **Behaviour change:** `BINANCE_URL` from `.env` or the environment is a
+> default only. A `--mode` or a query flag typed on the command line now
+> wins over it instead of being refused as a conflict. `.env.example`
+> ships it commented out.
 
 ### Fixed
+
+- **One refused page could buy several CAPTCHA solves.** The allowance
+  lived inside each landing, and every block-retry or rotation landed
+  again. With the solver stubbed: 2 solves with no pool, 4 with a 3-exit
+  pool, against `SOLVES_PER_PAGE = 1`. The allowance is now one
+  `page_flow.SolveBudget` per page, checked before each purchase and never
+  reset by a retry or a rotation. The `--pay-type` pre-check no longer
+  solves at all. A suite check drives the shared loop with a solver that
+  always "succeeds" and counts purchases.
+- **A failed write destroyed the previous good output.** `out.json`,
+  `out.csv` and `out.meta.json` were opened with truncation, so a failure
+  inside `json.dump` left 13 bytes of invalid JSON where a good file had
+  been. Each is now written to a temporary file in the same directory,
+  fsynced and renamed over the target. A new file gets the mode `open()`
+  would have given it (`0o666 & ~umask`), and an existing file keeps its
+  own. Each file is replaced atomically on its own; the three are not one
+  transaction.
+- **CSV cells could run as spreadsheet formulas.** Advertiser nicknames,
+  portfolio names and announcement titles are third-party text. See the
+  behaviour change above.
+- **A copied `.env.example` broke every flag-built query.** It set
+  `BINANCE_URL` to a P2P page, so `--mode announcements`,
+  `--mode copytrading` and `--asset/--fiat` all exited 2 with a conflict
+  against a URL nobody typed. The engines now record the typed `--url`
+  before `.env` is read.
+- **Advice for HTTP 451 named a country nobody had measured.** The exit-3
+  message, README, TROUBLESHOOTING, CONTRIBUTING and the bug template said
+  a US exit is refused. 451 has not been observed on binance.com, and the
+  daily canary is served from a GitHub-hosted runner with no proxy. The
+  message now says so and asks for the exit's country in an issue.
+- **A Scraping Browser 401 was explained as credentials that "last about
+  a day".** That figure was not measured (an endpoint has been seen working
+  after ten days). A 401 is now reported as refused credentials, expired or
+  mistyped.
+- A capture saved at the repo root (`--dump-html dump.html`) is ignored by
+  git, and `.dockerignore` excludes every `.env*` file.
+- Comments that pointed at private notes now state their reasons; a suite
+  check keeps it that way.
 
 - **`--retries 0` fetched nothing and called it a result.** The load loop is
   `range(1, retries + 1)`, so 0 never runs it and the engine judged
