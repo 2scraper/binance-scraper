@@ -47,8 +47,7 @@ from urllib.parse import urlparse
 # At module level, deliberately, and not inside the launch path. The offline
 # suite guards `import puppeteer_scraper` behind try/except ImportError and
 # REPORTS the skip, and CI's engine-smoke job fails on any reported skip.
-# That only works if importing this module actually requires the driver
-# (CLAUDE.md §10).
+# That only works if importing this module actually requires the driver.
 from pyppeteer import launch, connect
 
 from captcha_solver import detect_aws_waf, solve_recaptcha, AWS_WAF_COOKIE
@@ -65,11 +64,11 @@ logger = logging.getLogger("puppeteer_scraper")
 
 # Every await in this file goes through the bridge below with a timeout, so a
 # hung remote call ends the operation instead of the run. pyppeteer provides
-# no connect timeout of its own (§8).
+# no connect timeout of its own.
 DEFAULT_OP_TIMEOUT = 120
 CONNECT_TIMEOUT = 30
 
-# Chromium's own names for a proxy that could not be used (§8).
+# Chromium's own names for a proxy that could not be used.
 _PROXY_ERROR_MARKERS = (
     "ERR_PROXY_CONNECTION_FAILED",
     "ERR_TUNNEL_CONNECTION_FAILED",
@@ -83,7 +82,7 @@ _PROXY_ERROR_MARKERS = (
 
 # pyppeteer's dialect of the fetch() in playwright_scraper.FETCH_JS: the
 # arguments arrive POSITIONALLY rather than as one array. Same body, same
-# return shape, same AbortController timeout (§8), same `credentials:
+# return shape, same AbortController timeout, same `credentials:
 # "include"` so a solved aws-waf-token rides along.
 FETCH_JS = """
 async (url, method, body, timeoutMs) => {
@@ -177,7 +176,7 @@ class _AsyncBridge:
         self._thread.join(timeout=5)
 
 
-# Every `scheme://user:pass@` in a string, however many times it occurs (§8).
+# Every `scheme://user:pass@` in a string, however many times it occurs.
 _CREDENTIALS_IN_URL_RE = re.compile(r"([a-z][a-z0-9+.\-]*://)[^\s/@]+:[^\s/@]+@",
                                     re.IGNORECASE)
 
@@ -188,7 +187,7 @@ def _mask_credentials(text: str) -> str:
 
 
 def _chrome_ua(version: str) -> str:
-    """A desktop-Chrome UA naming the browser's OWN real version (§8).
+    """A desktop-Chrome UA naming the browser's OWN real version.
     pyppeteer's `browser.version()` returns "HeadlessChrome/115.0.0.0"."""
     number = version.split("/")[-1] if "/" in version else version
     return (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -214,7 +213,7 @@ class _Ops:
     """One pyppeteer browser + page, exposed as page_flow's named operations.
 
     Same contract as playwright_scraper._Ops, including the rule that a
-    rotation means a genuinely FRESH browser (§8).
+    rotation means a genuinely FRESH browser.
     """
 
     def __init__(self, bridge: _AsyncBridge, args, pool):
@@ -275,7 +274,7 @@ class _Ops:
             exit_url = self.pool.current
             # Credentials go through page.authenticate(), never onto the
             # command line: --proxy-server= is part of the browser's argv,
-            # readable by anything that can run `ps` (§8).
+            # readable by anything that can run `ps`.
             scrubbed, credentials = split_credentials(exit_url)
             launch_args.append(f"--proxy-server={scrubbed}")
             logger.info("Using proxy exit %s", mask(exit_url))
@@ -439,7 +438,7 @@ def handle_captcha_if_present(ops, args, proxy: Optional[str] = None) -> bool:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
                                 min_score=args.min_score, proxy=proxy)
-    except Exception as e:  # noqa: BLE001 — a solver error is a warning (§8)
+    except Exception as e:  # noqa: BLE001 — a solver error is a warning
         logger.error("Solving the AWS WAF CAPTCHA failed (%s) — continuing.",
                      _mask_credentials(str(e)))
         return False

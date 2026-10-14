@@ -92,8 +92,8 @@ Then the rest of the presentation, in the order that matters:
    three modes from a GitHub-hosted runner with no proxy. If a later run
    is refused for the runner's address, the canary's `BINANCE_PROXY`
    secret (an exit elsewhere) is the fix, with no workflow edit.
-2. The repo description, homepage and topics set (see the family notes on
-   what those should say).
+2. The repo description, homepage and topics set: the engines, the
+   2Captcha Scraping Browser API by that name, and what the site publishes.
 3. Only then the row in the org profile README — and check it with an
    ANONYMOUS request rather than your own logged-in browser. A row pointing
    at a private repo is a 404 for every visitor, which costs more trust than

@@ -11,7 +11,7 @@ Three modes, three row classes
 
 These are three different things with nothing in common beyond an id and a
 name, so they are three dataclasses rather than one wide row that is two-
-thirds null on every line (CLAUDE.md §9: a column that is null on every row
+thirds null on every line (a column that is null on every row
 of a mode should not exist in that mode's file).
 
 What they DO share, byte-identical and in order, is the family prefix:
@@ -120,7 +120,7 @@ class P2PAd:
     page: Optional[int] = None
     position: Optional[int] = None
     mode: Optional[str] = None
-    # "bapi": the site's own JSON endpoint. Provenance in a column (§8).
+    # "bapi": the site's own JSON endpoint. Provenance in a column.
     data_source: Optional[str] = None
 
 
@@ -179,7 +179,7 @@ class LeadTrader:
     # column and not only a sidecar field because it decides WHICH
     # portfolios are in a capped run at all: the first 300 by ROI and the
     # first 300 by AUM are different samples. `diff_runs.py` refuses to
-    # compare two runs that differ here (§21).
+    # compare two runs that differ here.
     sort: Optional[str] = None
     data_source: Optional[str] = None
 

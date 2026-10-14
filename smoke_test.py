@@ -121,7 +121,7 @@ def check_fixture_corpus_is_real_and_scrubbed():
 
 
 # ---------------------------------------------------------------------------
-# The parser, asserted on VALUES rather than on coverage (§10)
+# The parser, asserted on VALUES rather than on coverage
 # ---------------------------------------------------------------------------
 
 def _q(mode, **kw):
@@ -254,7 +254,7 @@ def check_page_sizes_are_the_measured_ones():
 
 
 def check_position_counts_emitted_rows_not_payload_slots():
-    """§24: a record the parser drops must not shift every later position."""
+    """A record the parser drops must not shift every later position."""
     import product_parser as P
     payload = copy.deepcopy(FIXTURES["p2p_usdt_eur_buy"])
     payload["data"].insert(1, {"adv": None, "advertiser": {}})
@@ -448,7 +448,7 @@ def check_the_waf_page_is_solvable_and_detected_fully():
 
 
 def check_markers_do_not_match_a_page_the_scraping_browser_served():
-    """§24: the Scraping Browser's auto-solve extension injects captcha
+    """The Scraping Browser's auto-solve extension injects captcha
     hunters into EVERY page, amazon_waf among them. The marker set must score
     zero against that injection WITHOUT any strip, or the strip is
     load-bearing and the next marker inherits the hole."""
@@ -479,7 +479,7 @@ def check_state_policy():
     check("challenge: retried, solved, blocked",
           F.should_retry("challenge") and F.should_solve("challenge")
           and F.counts_as_blocked("challenge"))
-    check("throttled: retried, NOT blocked (§24)",
+    check("throttled: retried, NOT blocked",
           F.should_retry("throttled") and not F.counts_as_blocked("throttled"))
     check("restricted and blocked: never solved, there is no widget",
           not F.should_solve("restricted") and not F.should_solve("blocked"))
@@ -523,7 +523,7 @@ def check_state_policy():
 
 
 def check_policy_constants_have_a_consumer():
-    """§17: a policy constant nothing reads is the same defect as dead code."""
+    """A policy constant nothing reads is the same defect as dead code."""
     src = open(os.path.join(HERE, "page_flow.py"), encoding="utf-8").read()
     for constant in ("RETRY_ON_BLOCKED", "BLOCK_RETRIES_WITHOUT_POOL",
                      "SOLVES_PER_PAGE", "THROTTLE_RETRIES", "THROTTLE_WAIT_S",
@@ -648,7 +648,7 @@ def check_the_shared_loop_end_to_end():
     equal("...fetched twice", ops.fetches, [1, 1])
     rc, meta, rows, ops = _run({1: [(429, "", None), (200, _p2p_page(1), None)]},
                                pages=1, retries=1)
-    equal("a throttle wait spends its OWN budget, not --retries (§24): "
+    equal("a throttle wait spends its OWN budget, not --retries: "
           "with --retries 1 the page still arrives", rc, 0)
 
     rc, meta, rows, ops = _run({1: [(202, "", "challenge"), (200, _p2p_page(1), None)]}, pages=1)
@@ -959,7 +959,7 @@ def check_row_schema():
                                ROW_CLASS_BY_MODE, UNIQUE_BY_SKU_MODES)
     for cls in (P2PAd, LeadTrader, Announcement):
         names = [f.name for f in fields(cls)]
-        equal("%s: the family prefix is byte-identical and in order (§9)" % cls.__name__,
+        equal("%s: the family prefix is byte-identical and in order" % cls.__name__,
               names[:5], ["source", "scraped_at", "url", "sku", "title"])
         check("%s: the run-describing tail is present" % cls.__name__,
               {"page", "position", "mode", "data_source"} <= set(names))
@@ -1113,7 +1113,7 @@ def check_exit_codes():
     equal("3 blocked / 4 empty / 5 never obtained / 6 partial",
           (O.EXIT_BLOCKED, O.EXIT_NO_PRODUCTS, O.EXIT_FETCH_FAILED, O.EXIT_PARTIAL),
           (3, 4, 5, 6))
-    check("end_of_listing is a COMPLETE stop reason (§24)",
+    check("end_of_listing is a COMPLETE stop reason",
           "end_of_listing" in O.COMPLETE_STOP_REASONS)
     check("api_rejected is NOT complete", "api_rejected" not in O.COMPLETE_STOP_REASONS)
 
@@ -1178,7 +1178,7 @@ def check_sidecar_shape():
 
 
 # ---------------------------------------------------------------------------
-# The engines — the checks CLAUDE.md §17 says to steal
+# The engines — checks that catch what import and --help cannot
 # ---------------------------------------------------------------------------
 
 def check_engines_import_their_driver_at_module_level():
@@ -1195,9 +1195,9 @@ def check_engines_import_their_driver_at_module_level():
 
 
 def check_shared_calls_bind_against_the_real_signature():
-    """§17's check #1. Every call from an engine (and the Scraper API client,
+    """Every call from an engine (and the Scraper API client,
     diff_runs and page_flow itself) into a shared module is bound against the
-    callee's real signature. A name that does not exist FAILS (§22). A name
+    callee's real signature. A name that does not exist FAILS. A name
     bound in the calling file shadows a same-named module."""
     import captcha_solver
     import output_writer
@@ -1272,8 +1272,7 @@ def _argparse_flags(module_name):
     return flags
 
 
-# The family's flag contract (CLAUDE.md §9, including the five it omitted
-# for months), plus this repo's own query flags.
+# The family's flag contract, plus this repo's own query flags.
 CONTRACT_FLAGS = {
     "--url", "--pages", "--category", "--format", "--out", "--delay",
     "--retries", "--retry-delay", "--concurrency", "--proxy", "--proxy-file",
@@ -1287,7 +1286,7 @@ BINANCE_FLAGS = {"--asset", "--fiat", "--side", "--pay-type", "--amount",
 
 
 def check_engine_flag_sets():
-    """§17's check #2: against the contract AND against each other, both
+    """Against the contract AND against each other, both
     ways. The exception list IS the documentation."""
     sets = {m: _argparse_flags(m) for m in ENGINES}
     for module, flags in sets.items():
@@ -1307,7 +1306,7 @@ def check_engine_flag_sets():
 
 
 # The flags that describe a browser, and so are absent from the HTTP engine.
-# The list IS the documentation (§17): the check fails if the HTTP engine
+# The list IS the documentation: the check fails if the HTTP engine
 # gains one, loses a shared one, or if one of these leaves the browser
 # engines while still listed here.
 BROWSER_ONLY_FLAGS = {"--headless", "--headful", "--cdp-endpoint", "--locale",
@@ -1340,7 +1339,7 @@ def check_banned_and_removed_flags():
 
 
 def check_undefined_names_in_every_module():
-    """§10: compileall proves a file PARSES, not that its names RESOLVE.
+    """compileall proves a file PARSES, not that its names RESOLVE.
     Kept COARSE (pooled bindings) so it under-reports rather than invents."""
     import builtins
     for filename in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
@@ -1456,7 +1455,7 @@ def check_credential_scan_is_one_implementation_invoked_from_both():
     script = os.path.join(HERE, ".github", "ci_checks.py")
     if not os.path.isdir(os.path.join(HERE, ".github")):
         # Inside the Docker image, which copies no .github at all. Triggered
-        # by the WHOLE directory being absent, never by one file in it (§22).
+        # by the WHOLE directory being absent, never by one file in it.
         skip("ci_checks", "no .github directory (the image)")
         return
     check("the credential scan exists as a script", os.path.exists(script))
@@ -1505,7 +1504,7 @@ def check_the_hex_exemption_is_one_context_only():
 
 
 # Assembled from pieces, so this file can be scanned like every other rather
-# than exempted (§22: the file most likely to acquire a stray phrase is the
+# than exempted (the file most likely to acquire a stray phrase is the
 # one a wholesale exemption never reads).
 BANNED_WORDING = (
     "cloud" + " browser", "anti" + "detect browser", "2scraper " + "Anti" + "detect Browser",
@@ -1514,7 +1513,7 @@ BANNED_WORDING = (
 
 
 def check_banned_wording():
-    """§12, enforced by this test rather than by review."""
+    """Banned product wording, enforced by this test rather than by review."""
     scanned = 0
     for root, dirs, files in os.walk(HERE):
         dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache",
@@ -1533,8 +1532,45 @@ def check_banned_wording():
     check("the banned-wording scan read the repo (%d files)" % scanned, scanned > 20)
 
 
+# References to private notes this public repo cannot link to: a reader
+# can open none of them, so a rule is stated in this repo's own words instead.
+# Assembled from pieces so this file is scanned like every other.
+PRIVATE_CITATIONS = (
+    "CLAUDE" + ".md", "claude_" + "2scraper", "2scraper_" + "repo_rules",
+    "play" + "book",
+)
+SECTION_SIGN_REF = re.compile("\u00a7" + r"\s*\d")
+
+
+def check_no_private_citations_in_shipped_files():
+    scanned = 0
+    for root, dirs, files in os.walk(HERE):
+        dirs[:] = [d for d in dirs
+                   if d not in (".git", "__pycache__", ".pytest_cache", "live",
+                                "captures", ".claude")
+                   and not os.path.exists(os.path.join(root, d, "pyvenv.cfg"))]
+        for filename in files:
+            if not filename.endswith((".py", ".md", ".yml", ".yaml", ".txt",
+                                      ".toml", ".cfg", ".example", ".json",
+                                      ".gitignore", ".dockerignore")) \
+                    and filename != "Dockerfile":
+                continue
+            path = os.path.join(root, filename)
+            text = open(path, encoding="utf-8", errors="replace").read()
+            scanned += 1
+            rel = os.path.relpath(path, HERE)
+            for token in PRIVATE_CITATIONS:
+                if token.lower() in text.lower():
+                    check("%s cites no private note (%r)" % (rel, token), False)
+            m = SECTION_SIGN_REF.search(text)
+            if m:
+                line = text.count("\n", 0, m.start()) + 1
+                check("%s:%d carries no bare section-number reference" % (rel, line), False)
+    check("the private-citation scan read the repo (%d files)" % scanned, scanned > 20)
+
+
 def check_concurrency_with_the_browser_stubbed():
-    """§10: a live run cannot always reach this machinery. Driven through the
+    """A live run cannot always reach this machinery. Driven through the
     SHARED worker loop with the fetch replaced."""
     import page_flow
     import queue as queue_mod
@@ -1641,7 +1677,7 @@ def check_fingerprint_kwargs_are_ones_the_driver_accepts():
 
 
 def check_engines_do_not_evaluate_a_string_in_the_browser():
-    """§18: wait_for_function evaluates a string, which a CSP without
+    """`wait_for_function` evaluates a string, which a CSP without
     unsafe-eval kills. page.evaluate with a real function is fine."""
     for module in ENGINES:
         tree = ast.parse(open(os.path.join(HERE, module + ".py"), encoding="utf-8").read())
@@ -1785,7 +1821,7 @@ def check_x_debug_header_is_redacted():
 
 
 def check_captcha_capability_claims_match_the_code():
-    """§19: the most expensive bug this family can ship is a SENTENCE."""
+    """The most expensive bug this family can ship is a SENTENCE."""
     readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
     solver = open(os.path.join(HERE, "captcha_solver.py"), encoding="utf-8").read()
     low = readme.lower()
@@ -1798,7 +1834,7 @@ def check_captcha_capability_claims_match_the_code():
 
 
 def check_readme_numbers_are_not_stale():
-    """§17's check #4: a column count claimed in the README is a class's."""
+    """A column count claimed in the README is a class's."""
     readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
     from output_writer import ROW_CLASS_BY_MODE
     sizes = {len(fields(c)) for c in ROW_CLASS_BY_MODE.values()}

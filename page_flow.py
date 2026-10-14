@@ -2,7 +2,7 @@
 page_flow.py
 ------------
 The retry / solve / blocked decision, as DATA rather than as three copies of
-an if-chain (CLAUDE.md §1).
+an if-chain.
 
 binance.com answers one of this repo's requests in eight ways, and they want
 six different responses:
@@ -24,8 +24,8 @@ Three copies of that triage across three engines would drift, and the drift
 would be silent: one engine reporting exit 3 where its twin reports exit 0
 on the same response.
 
-Nothing here imports a browser, and **no JavaScript crosses this boundary**
-(§1). Each engine spells its fetch() in its own driver's dialect.
+Nothing here imports a browser, and **no JavaScript crosses this boundary**.
+Each engine spells its fetch() in its own driver's dialect.
 """
 
 import logging
@@ -52,7 +52,7 @@ log = logging.getLogger("page_flow")
 # How long one fetch() may take before the engine gives up on it. The
 # largest response measured was 76 KB of P2P JSON, which arrived in well
 # under a second. The bound exists because a browser fetch() has no timeout
-# of its own, and CLAUDE.md §8 requires every remote call to have one.
+# of its own, and every remote call here has to be bounded.
 FETCH_TIMEOUT_MS = 30_000
 
 # How long to wait at the SAME exit after a 429/418 before trying again.
@@ -81,7 +81,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     The argument ORDER is the contract: every engine calls
     `classify(html, status, url, waf_action)`. A sibling repo shipped
     `classify(html, url=...)` in two of three engines against a callee that
-    took `status` second, and both crashed on their first fetch (§17).
+    took `status` second, and both crashed on their first fetch.
     `smoke_test.py` binds every engine's call against this signature for
     that reason.
     """
@@ -107,7 +107,7 @@ STATE_POLICY = {
     # Rate limited. The retry happens at the same exit after a wait
     # (THROTTLE_*). It is NOT counted as blocked: calling a throttle a block
     # reports exit 3 for a page that was about to come back, and sends a
-    # reader to buy a proxy they do not need (§24).
+    # reader to buy a proxy they do not need.
     "throttled":  {"retry": True,  "solve": False, "blocked": False, "parse": False},
     # HTTP 451, "Unavailable For Legal Reasons". NOT OBSERVED on binance.com
     # by this repo: Binance's own API documentation names 403 (WAF), 429 and
@@ -138,7 +138,7 @@ def should_parse(state: str) -> bool:
 
 
 # Whether a blocked page is worth re-fetching at all. CONSULTED by every
-# engine, so setting it False really does stop the retry loop (§17).
+# engine, so setting it False really does stop the retry loop.
 RETRY_ON_BLOCKED = True
 
 # How many times to re-fetch a blocked page when there is no proxy pool to
@@ -176,7 +176,7 @@ def concurrency_limit(cdp_endpoint: Optional[str]) -> Optional[int]:
 
     The Scraping Browser API allows ONE live connection per profile, so N
     workers sharing a `pid` collide with `profile_locked`. Several `pid`s,
-    one run each, is the way to parallelise that path (§7).
+    one run each, is the way to parallelise that path.
     """
     return 1 if cdp_endpoint else None
 
@@ -243,7 +243,7 @@ def build_query(args, error: Callable[[str], None]) -> Query:
     --url and the query flags are two ways to say the same thing. A flag the
     user typed that disagrees with the URL would silently scrape something
     neither of them named, so the combination is refused rather than merged
-    (the family's --country rule, §10). `error` is argparse's `p.error`, so
+    (the family's --country rule). `error` is argparse's `p.error`, so
     a refusal is exit 2 with the usage line, as in every engine.
     """
     typed_url = getattr(args, "typed_url", args.url)
@@ -309,7 +309,7 @@ def finish(args, query: Query, outcomes: List, stop_reason: str,
     """Merge the pages in PAGE order, write the output, return the exit code.
 
     One implementation for the three engines, so the merge order, the
-    dedupe and the sidecar cannot differ between them (§6).
+    dedupe and the sidecar cannot differ between them.
     """
     rows, seen = [], set()
     for oc in sorted(outcomes, key=lambda o: o.page_num):
@@ -390,7 +390,7 @@ def cookie_domain(host: Optional[str], html: Optional[str] = None) -> str:
 # transport failure, waiting out a throttle, rotating on a refusal, and
 # parsing what came back. The three engines differ only in HOW they ask
 # their driver, so each passes in an object with these operations and no
-# JavaScript crosses this boundary (§1):
+# JavaScript crosses this boundary:
 #
 #     ops.goto(url)        -> (status, waf_header). Raises TransportError.
 #     ops.document_text()  -> the landing document, JSON text if it is JSON
@@ -402,7 +402,7 @@ def cookie_domain(host: Optional[str], html: Optional[str] = None) -> str:
 #     ops.proxy_failure(text) -> the driver's proxy-error name in text, or ""
 #
 # Before this, each engine carried its own copy of the loop, and a family
-# rule (§6) says the three must agree on exit codes and on whether a run
+# rule says the three must agree on exit codes and on whether a run
 # spends money. One copy is how that holds by construction.
 
 
@@ -416,7 +416,7 @@ class PageOutcome:
 
     Collected per page and merged afterwards, in page order, rather than
     folded into shared state as the loop goes, so the output cannot depend
-    on which page happened to finish first (§8).
+    on which page happened to finish first.
     """
     page_num: int
     url: str
@@ -567,7 +567,7 @@ def _unread(rows: List, total: Optional[int], pages: Optional[int],
 
 
 def _dump(args, page_num: int, text: str) -> None:
-    """Write the exact response the parser was given, on success too (§9)."""
+    """Write the exact response the parser was given, on success too."""
     if not args.dump_html:
         return
     path = args.dump_html if args.pages == 1 else f"{args.dump_html}.page{page_num}"
@@ -630,7 +630,7 @@ def fetch_one_page(ops, args, pool, query: Query, page_num: int,
                     ops.landed = False
             if state == "throttled" and throttles < THROTTLE_RETRIES:
                 throttles += 1
-                attempt -= 1  # a throttle wait spends its own budget (§24)
+                attempt -= 1  # a throttle wait spends its own budget
                 pause = THROTTLE_WAIT_S * throttles
                 log.warning("Rate-limited on page %d (HTTP 429/418) — waiting "
                             "%.0fs at the same exit (%d/%d).", page_num, pause,
@@ -768,7 +768,7 @@ def run_pages(open_ops, close_ops, run_concurrently, args, pool,
             return 2
 
         # Page 1 is always fetched alone: its total decides how many pages
-        # there are to address (§7).
+        # there are to address.
         first = fetch_one_page(ops, args, pool, query, 1, mask)
         outcomes.append(first)
         if not first.ok:
@@ -875,7 +875,7 @@ def worker_pool(pool, worker_index: int):
     """A private ProxyPool for one worker, starting at a different exit.
 
     Workers start on distinct exits and share no mutable state, so rotation
-    needs no lock (§7).
+    needs no lock.
     """
     if not pool:
         return None

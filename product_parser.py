@@ -1,7 +1,7 @@
 """
 product_parser.py
 -----------------
-Everything this repo knows about binance.com lives here (CLAUDE.md §1).
+Everything this repo knows about binance.com lives here.
 
 Three modes, three of the site's own JSON endpoints
 ---------------------------------------------------
@@ -25,7 +25,7 @@ Measured 2026-09-24 from a datacentre address (netcup, AS197540):
     each of the three endpoints above, plain curl, no cookies
         -> HTTP 200, the full JSON the site's own front end renders
 
-So the gate is per ROUTE, not per site (CLAUDE.md §21): the pages are
+So the gate is per ROUTE, not per site: the pages are
 behind AWS WAF and the front end's own data calls are not. There is no HTML
 parser in this file because no HTML page is needed for any mode. The
 engines drive a real browser anyway, and the browser earns its keep in two
@@ -439,7 +439,7 @@ OK_CODE = "000000"
 # `gokuProps` and the token host are the WAF's own integration vocabulary,
 # not text a page would carry. The bare word `captcha` is NOT a marker: the
 # Scraping Browser's auto-solve extension injects hunter scripts that say it
-# on every page (CLAUDE.md §24).
+# on every page.
 AWS_WAF_MARKERS = ("gokuProps", "token.awswaf.com", "awswaf.com/")
 
 # The HTTP statuses AWS WAF uses for an interstitial. 202 comes with an empty
@@ -495,7 +495,7 @@ def detect_page_state(text: Optional[str], status: Optional[int] = None,
         blocked     403, or any other refusal with no widget
         unknown     anything else: not JSON, not an interstitial
 
-    Signals are ordered by what they PROVE, not by what they cost (§17):
+    Signals are ordered by what they PROVE, not by what they cost:
     parseable JSON with the site's own envelope is checked first, because
     no interstitial carries it.
     """
@@ -762,7 +762,7 @@ def parse_page(payload: Any, query: Query, page: int = 1) -> List[Any]:
     """Every row on one page of one mode's response, in the site's order.
 
     `position` counts the rows EMITTED, not the slots in the payload, so a
-    record the parser drops cannot shift every later position (§24).
+    record the parser drops cannot shift every later position.
     """
     p = _as_dict(payload)
     if str(p.get("code")) != OK_CODE:

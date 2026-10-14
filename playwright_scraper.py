@@ -87,7 +87,7 @@ logger = logging.getLogger("playwright_scraper")
 
 
 # Chromium's own names for a proxy that could not be used. Distinguished
-# from a timeout because the two want opposite responses (CLAUDE.md §8).
+# from a timeout because the two want opposite responses.
 _PROXY_ERROR_MARKERS = (
     "ERR_PROXY_CONNECTION_FAILED",
     "ERR_TUNNEL_CONNECTION_FAILED",
@@ -101,13 +101,13 @@ _PROXY_ERROR_MARKERS = (
 
 # The fetch() every page goes through. It is handed to `page.evaluate` as a
 # FUNCTION, which Playwright sends through `Runtime.callFunctionOn` rather
-# than evaluating a string, so it works under any Content-Security-Policy
-# (§18). It returns the status, the body and the WAF's own header, because
+# than evaluating a string, so it works under any Content-Security-Policy.
+# It returns the status, the body and the WAF's own header, because
 # a 202 challenge has an empty body and the header is then the only signal.
 #
 # `credentials: "include"` so a solved `aws-waf-token` cookie rides along.
 # The AbortController is the timeout: a browser fetch() has none of its own,
-# and §8 requires every remote call to be bounded.
+# and every remote call here has to be bounded.
 FETCH_JS = """
 async ([url, method, body, timeoutMs]) => {
   const ctl = new AbortController();
@@ -137,7 +137,7 @@ BODY_TEXT_JS = "() => document.body ? document.body.innerText : ''"
 
 
 def _chrome_ua(chromium_version: str) -> str:
-    """A desktop-Chrome UA naming the browser's OWN real version (§8)."""
+    """A desktop-Chrome UA naming the browser's OWN real version."""
     return (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
             f"(KHTML, like Gecko) Chrome/{chromium_version} Safari/537.36")
 
@@ -156,7 +156,7 @@ def _launch_local(pw, args, pool):
 
     A proxy rotation tears the whole browser down and calls this again.
     Cookies a bot manager issued against one exit, replayed from another,
-    are a stronger signal than either address alone (§8), and on this site
+    are a stronger signal than either address alone, and on this site
     that includes a solved `aws-waf-token`.
     """
     launch_kwargs = {"headless": args.headless}
@@ -194,7 +194,7 @@ class _Ops:
 
     A rotation means a genuinely FRESH browser: cookies a bot manager issued
     against one exit, replayed from another, are a stronger signal than
-    either address alone (§8), and here that includes a solved
+    either address alone, and here that includes a solved
     `aws-waf-token`.
     """
 
@@ -311,7 +311,7 @@ def _connect_remote(pw, args):
             break
     if browser is None:
         # The endpoint carries a password, and Playwright repeats it five
-        # times in its error text (§8). Rewritten with it masked, keeping
+        # times in its error text. Rewritten with it masked, keeping
         # host and port, which are the useful half.
         raise PWError(
             f"could not connect to --cdp-endpoint "
@@ -340,7 +340,7 @@ def _connect_remote(pw, args):
 
 # Every `scheme://user:pass@` in a string, however many times it occurs.
 # Matching GLOBALLY is the point: a Playwright connection error repeats the
-# endpoint five times (§8).
+# endpoint five times.
 _CREDENTIALS_IN_URL_RE = re.compile(r"([a-z][a-z0-9+.\-]*://)[^\s/@]+:[^\s/@]+@",
                                     re.IGNORECASE)
 
@@ -369,7 +369,7 @@ def handle_captcha_if_present(page, args, proxy: Optional[str] = None) -> bool:
     Nothing is paid for a page that holds no puzzle. The WAF's CHALLENGE
     action carries only `challenge.js`, and there is no answer to buy for
     that. A browser that runs it passes by itself, which is what the settle
-    wait in `_land` is for (§19: "unsolvable" is a property of a page).
+    wait in `_land` is for ("unsolvable" is a property of a page).
     """
     try:
         html = page.content()
@@ -394,7 +394,7 @@ def handle_captcha_if_present(page, args, proxy: Optional[str] = None) -> bool:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
                                 api_version=args.captcha_api,
                                 min_score=args.min_score, proxy=proxy)
-    except Exception as e:  # noqa: BLE001 — a solver error is a warning (§8)
+    except Exception as e:  # noqa: BLE001 — a solver error is a warning
         logger.error("Solving the AWS WAF CAPTCHA failed (%s) — continuing.",
                      _mask_credentials(str(e)))
         return False
@@ -418,7 +418,7 @@ def _fetch_pages_concurrently(args, pool, query: Query, page_nums, concurrency: 
 
     Each worker owns its own Playwright instance, browser and exit: with the
     sync API a browser belongs to the thread that made it, so sharing one is
-    not an option even in principle (§7). The page loop itself is
+    not an option even in principle. The page loop itself is
     page_flow.worker_loop, shared by all three engines.
     """
     work = queue.Queue()
