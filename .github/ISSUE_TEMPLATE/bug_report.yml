@@ -12,11 +12,9 @@ body:
 
         A few things answer most reports faster than we can:
 
-        - **Exit 3 from a US address?** Binance's terms exclude some
-          jurisdictions, the United States among them (binance.us is a
-          separate exchange). Try an exit elsewhere, and say in the report
-          what the sidecar's `stop_reason` was: this repo has not measured
-          what such an address is answered with.
+        - **Exit 3 with `blocked_geo-451`?** This has not been observed on
+          binance.com in testing. Say in the report which country the exit
+          was in.
         - **Exit 3 with `blocked_aws-waf`?** The site's AWS WAF challenged
           the session. The data endpoints were not gated when this repo was
           written, so this is news worth reporting, together with the exit

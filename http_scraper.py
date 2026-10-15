@@ -28,10 +28,10 @@ What it gives up, and says so rather than failing quietly
   15-second wait for a script to run, and names the engine that can.
 * **No --cdp-endpoint, --fingerprint, --locale or --headless**: they
   describe a browser. `--proxy`, `--proxy-file` and rotation work: a
-  rotation is a fresh session, so no cookie crosses exits (§8).
+  rotation is a fresh session, so no cookie crosses exits.
 * **Its own identity.** It sends requests' own User-Agent rather than
   claiming to be Chrome over a TLS handshake that is not Chrome's, which is
-  the contradiction a sibling site refused (§24). Measured here: P2P
+  the contradiction a sibling site refused. Measured here: P2P
   answered both identities 6 of 6.
 
 Usage
@@ -68,7 +68,7 @@ CONNECT_TIMEOUT_S = 15.0
 # The words requests and urllib3 use for a proxy that could not be used.
 # Distinguished from a timeout because the two want opposite responses: a
 # timeout deserves another try at the same exit, a dead proxy a different
-# one (§8).
+# one.
 _PROXY_ERROR_MARKERS = (
     "ProxyError",
     "Unable to connect to proxy",
@@ -164,7 +164,7 @@ class _Ops:
 
     def relaunch(self):
         """A fresh session on the pool's current exit, so no cookie issued
-        against one exit is replayed from another (§8)."""
+        against one exit is replayed from another."""
         self.close()
         self.open()
 
@@ -321,6 +321,9 @@ def parse_args(argv=None):
                         "success as well as failure. It is JSON; the flag "
                         "keeps the family's name.")
     args = p.parse_args(argv)
+    # Before .env fills it: a URL from the environment is a default,
+    # and must not refuse a --mode or a query flag the user typed.
+    args.typed_url = args.url
     env_config.apply(args)
     # Read by the shared loop, which serves the browser engines too. There is
     # no remote browser here.

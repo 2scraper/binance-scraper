@@ -99,7 +99,7 @@ class CaptchaChallenge:
     page_url: str = ""
     # AWS WAF only. Its task needs three values that all live together in
     # `window.gokuProps` on the challenge page, plus the two script URLs the
-    # page loads. Unlike Cloudflare Turnstile (§19 of the family notes),
+    # page loads. Unlike Cloudflare Turnstile,
     # nothing has to be intercepted at runtime to get them: AWS WAF prints
     # all of it into the served HTML, so a static read is enough.
     iv: Optional[str] = None
@@ -151,7 +151,7 @@ class CaptchaChallenge:
     def has_captcha_widget(self) -> bool:
         """Is there a widget on this page for a solver to work on?
 
-        Section 19's rule: "unsolvable" is a property of a PAGE, not of a
+        "Unsolvable" is a property of a PAGE, not of a
         vendor, and it means the page carries no widget. A challenge-action
         page carries none, so sending it to a solver buys a token for a
         puzzle that was never rendered -- measured at $0.00145 a time, since
@@ -268,8 +268,8 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
        attributes (data-captcha-type="recaptcha" data-version="v3"
        data-sitekey="..." data-action="..."), with the actual execute()
        call happening inside a bundled JS file, never appearing as
-       readable inline script text at all — confirmed live on the sibling
-       farfetch-scraper repo's target,
+       readable inline script text at all — confirmed live on a retail
+       site's
        sign-up modal via DevTools inspection. A previous version of this
        function, which only checked for format 1, reported "no captcha"
        on this exact page despite one being genuinely present — caught by
@@ -319,7 +319,7 @@ def detect_recaptcha_v3(html: str, page_url: str) -> Optional[CaptchaChallenge]:
 
 # ---------------------------------------------------------------------------
 # Runtime detection (added 2026-08-24 — the static-HTML detector below no
-# longer matched the sibling farfetch-scraper repo's target)
+# longer matched a retail site's sign-up modal)
 # ---------------------------------------------------------------------------
 #
 # What changed there: the sign-up modal used to render
@@ -949,4 +949,4 @@ solve_recaptcha_v3 = solve_recaptcha
 # what the address has been doing — a narrow list is how a challenge gets
 # reported as an empty page months later. A solver for a challenge this site
 # has never been observed to serve is dead code; a DETECTOR for one is cheap
-# insurance. See the family note in CLAUDE.md.
+# insurance.

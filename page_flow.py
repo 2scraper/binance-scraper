@@ -2,7 +2,7 @@
 page_flow.py
 ------------
 The retry / solve / blocked decision, as DATA rather than as three copies of
-an if-chain (CLAUDE.md §1).
+an if-chain.
 
 binance.com answers one of this repo's requests in eight ways, and they want
 six different responses:
@@ -24,8 +24,8 @@ Three copies of that triage across three engines would drift, and the drift
 would be silent: one engine reporting exit 3 where its twin reports exit 0
 on the same response.
 
-Nothing here imports a browser, and **no JavaScript crosses this boundary**
-(§1). Each engine spells its fetch() in its own driver's dialect.
+Nothing here imports a browser, and **no JavaScript crosses this boundary**.
+Each engine spells its fetch() in its own driver's dialect.
 """
 
 import logging
@@ -52,7 +52,7 @@ log = logging.getLogger("page_flow")
 # How long one fetch() may take before the engine gives up on it. The
 # largest response measured was 76 KB of P2P JSON, which arrived in well
 # under a second. The bound exists because a browser fetch() has no timeout
-# of its own, and CLAUDE.md §8 requires every remote call to have one.
+# of its own, and every remote call here has to be bounded.
 FETCH_TIMEOUT_MS = 30_000
 
 # How long to wait at the SAME exit after a 429/418 before trying again.
@@ -81,7 +81,7 @@ def classify(html: Optional[str], status: Optional[int] = None,
     The argument ORDER is the contract: every engine calls
     `classify(html, status, url, waf_action)`. A sibling repo shipped
     `classify(html, url=...)` in two of three engines against a callee that
-    took `status` second, and both crashed on their first fetch (§17).
+    took `status` second, and both crashed on their first fetch.
     `smoke_test.py` binds every engine's call against this signature for
     that reason.
     """
@@ -107,7 +107,7 @@ STATE_POLICY = {
     # Rate limited. The retry happens at the same exit after a wait
     # (THROTTLE_*). It is NOT counted as blocked: calling a throttle a block
     # reports exit 3 for a page that was about to come back, and sends a
-    # reader to buy a proxy they do not need (§24).
+    # reader to buy a proxy they do not need.
     "throttled":  {"retry": True,  "solve": False, "blocked": False, "parse": False},
     # HTTP 451, "Unavailable For Legal Reasons". NOT OBSERVED on binance.com
     # by this repo: Binance's own API documentation names 403 (WAF), 429 and
@@ -138,7 +138,7 @@ def should_parse(state: str) -> bool:
 
 
 # Whether a blocked page is worth re-fetching at all. CONSULTED by every
-# engine, so setting it False really does stop the retry loop (§17).
+# engine, so setting it False really does stop the retry loop.
 RETRY_ON_BLOCKED = True
 
 # How many times to re-fetch a blocked page when there is no proxy pool to
@@ -176,7 +176,7 @@ def concurrency_limit(cdp_endpoint: Optional[str]) -> Optional[int]:
 
     The Scraping Browser API allows ONE live connection per profile, so N
     workers sharing a `pid` collide with `profile_locked`. Several `pid`s,
-    one run each, is the way to parallelise that path (§7).
+    one run each, is the way to parallelise that path.
     """
     return 1 if cdp_endpoint else None
 
@@ -195,10 +195,15 @@ def refusal_advice(state: str) -> str:
     """One sentence on what changes the answer, per refusal. Kept here so
     the three engines cannot give three different pieces of advice."""
     if state == "restricted":
-        return ("HTTP 451 means the site refuses this exit's COUNTRY. "
-                "Binance's terms exclude some jurisdictions, the United "
-                "States among them. Use an exit elsewhere: --proxy, or a "
-                "Scraping Browser country- segment.")
+        # Kept as a state because it is cheap, but nobody has seen
+        # binance.com answer 451: the daily canary is served from a
+        # GitHub-hosted runner with no proxy. So the advice states the
+        # status and does not send anyone to buy an exit over a guess.
+        return ("HTTP 451 (unavailable for legal reasons) has not been "
+                "observed on binance.com in testing. Please open an issue "
+                "with the sidecar's stop_reason and the exit's country; an "
+                "exit in another COUNTRY (--proxy, or a Scraping Browser "
+                "country- segment) is what would change this answer.")
     if state == "challenge":
         return ("AWS WAF challenged this session. A residential exit "
                 "(--proxy) may not be challenged at all; otherwise set "
@@ -238,9 +243,20 @@ def build_query(args, error: Callable[[str], None]) -> Query:
     --url and the query flags are two ways to say the same thing. A flag the
     user typed that disagrees with the URL would silently scrape something
     neither of them named, so the combination is refused rather than merged
-    (the family's --country rule, §10). `error` is argparse's `p.error`, so
+    (the family's --country rule). `error` is argparse's `p.error`, so
     a refusal is exit 2 with the usage line, as in every engine.
     """
+    typed_url = getattr(args, "typed_url", args.url)
+    if args.url and not typed_url:
+        # The URL came from BINANCE_URL, not from the command line. It is a
+        # default for a run given nothing else, so a --mode or a query flag
+        # the user typed wins instead of being refused as a conflict.
+        typed_flags = [flag for dest, flag in QUERY_FLAGS
+                       if getattr(args, dest, None) is not None]
+        if args.mode or typed_flags:
+            log.info("Ignoring BINANCE_URL from the environment: the query "
+                     "was given on the command line.")
+            args.url = None
     if args.url:
         query, why = query_from_url(args.url)
         if query is None:
@@ -293,7 +309,7 @@ def finish(args, query: Query, outcomes: List, stop_reason: str,
     """Merge the pages in PAGE order, write the output, return the exit code.
 
     One implementation for the three engines, so the merge order, the
-    dedupe and the sidecar cannot differ between them (§6).
+    dedupe and the sidecar cannot differ between them.
     """
     rows, seen = [], set()
     for oc in sorted(outcomes, key=lambda o: o.page_num):
@@ -374,7 +390,7 @@ def cookie_domain(host: Optional[str], html: Optional[str] = None) -> str:
 # transport failure, waiting out a throttle, rotating on a refusal, and
 # parsing what came back. The three engines differ only in HOW they ask
 # their driver, so each passes in an object with these operations and no
-# JavaScript crosses this boundary (§1):
+# JavaScript crosses this boundary:
 #
 #     ops.goto(url)        -> (status, waf_header). Raises TransportError.
 #     ops.document_text()  -> the landing document, JSON text if it is JSON
@@ -386,7 +402,7 @@ def cookie_domain(host: Optional[str], html: Optional[str] = None) -> str:
 #     ops.proxy_failure(text) -> the driver's proxy-error name in text, or ""
 #
 # Before this, each engine carried its own copy of the loop, and a family
-# rule (§6) says the three must agree on exit codes and on whether a run
+# rule says the three must agree on exit codes and on whether a run
 # spends money. One copy is how that holds by construction.
 
 
@@ -400,7 +416,7 @@ class PageOutcome:
 
     Collected per page and merged afterwards, in page order, rather than
     folded into shared state as the loop goes, so the output cannot depend
-    on which page happened to finish first (§8).
+    on which page happened to finish first.
     """
     page_num: int
     url: str
@@ -441,15 +457,49 @@ CORE_FIELDS = {
 }
 
 
-def land(ops, args) -> Tuple[str, Optional[str]]:
+class SolveBudget:
+    """The paid-solve allowance for ONE page, shared by every landing on it.
+
+    Created once per `fetch_one_page` call and handed to every `land()` that
+    page makes. It is checked BEFORE each purchase and is never reset by a
+    transport retry, a block-retry or an exit rotation: a fresh browser or a
+    fresh exit is a reason to fetch again, not a fresh allowance.
+
+    Before this existed the allowance was a loop inside `land()`, so it
+    restarted on every landing. With the solver stubbed, one refused page
+    bought 2 solves with no proxy pool and 4 with a 3-exit pool, against
+    SOLVES_PER_PAGE = 1.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = limit
+        self.spent = 0
+
+    def spend(self, solve: Callable[[], bool]) -> bool:
+        """Call `solve` if the allowance has room; return what it returned."""
+        if self.spent >= self.limit:
+            log.warning("The CAPTCHA came back, and this page's solve "
+                        "allowance (%d) is already spent — not paying for "
+                        "another.", self.limit)
+            return False
+        self.spent += 1
+        return bool(solve())
+
+
+def land(ops, args, budget: Optional[SolveBudget] = None
+         ) -> Tuple[str, Optional[str]]:
     """Put the page on a www.binance.com document that fetch() can use.
 
     Returns (state, error): state is a policy state for the landing, and
-    error is a transport failure's text or None. Solves at most
-    SOLVES_PER_PAGE CAPTCHAs, because a CAPTCHA that survives a solved token
-    is not one this run can pass, and a second solve is a second charge for
-    the same answer.
+    error is a transport failure's text or None. Every solve goes through
+    `budget`, the allowance of the page this landing serves, so landing
+    again after a retry or a rotation cannot buy a second token for the
+    same page. A CAPTCHA that survives a solved token is not one this run
+    can pass, and a second solve is a second charge for the same answer.
+    Without a budget the landing solves nothing.
     """
+    if budget is None:
+        budget = SolveBudget(limit=0)
     try:
         status, waf = ops.goto(ORIGIN_URL)
     except TransportError as e:
@@ -465,13 +515,10 @@ def land(ops, args) -> Tuple[str, Optional[str]]:
             ops.wait_ms(CHALLENGE_POLL_MS)
             waited += CHALLENGE_POLL_MS
             state = classify(ops.document_text(), None, ORIGIN_URL, None)
-        if state == "challenge" and should_solve(state):
-            for _ in range(SOLVES_PER_PAGE):
-                if not ops.solve_captcha():
-                    break
-                state = classify(ops.document_text(), None, ORIGIN_URL, None)
-                if state != "challenge":
-                    break
+        while state == "challenge" and should_solve(state):
+            if not budget.spend(ops.solve_captcha):
+                break
+            state = classify(ops.document_text(), None, ORIGIN_URL, None)
     ops.landed = state in ("content", "empty")
     return state, None
 
@@ -520,7 +567,7 @@ def _unread(rows: List, total: Optional[int], pages: Optional[int],
 
 
 def _dump(args, page_num: int, text: str) -> None:
-    """Write the exact response the parser was given, on success too (§9)."""
+    """Write the exact response the parser was given, on success too."""
     if not args.dump_html:
         return
     path = args.dump_html if args.pages == 1 else f"{args.dump_html}.page{page_num}"
@@ -554,6 +601,8 @@ def fetch_one_page(ops, args, pool, query: Query, page_num: int,
         args.proxy_block_retries if has_pool else BLOCK_RETRIES_WITHOUT_POOL)
     throttles = 0
     state, text, last_error, exit_failed = "unknown", "", None, None
+    # One allowance for the whole page, across every landing below.
+    budget = SolveBudget()
 
     for block_attempt in range(block_retries + 1):
         log.info("Fetching page %d/%d: %s", page_num, args.pages, req.label)
@@ -563,7 +612,7 @@ def fetch_one_page(ops, args, pool, query: Query, page_num: int,
             attempt += 1
             text, last_error = "", None
             if not ops.landed:
-                state, last_error = land(ops, args)
+                state, last_error = land(ops, args, budget)
                 if last_error:
                     exit_failed = ops.proxy_failure(last_error) or None
                     if exit_failed:
@@ -581,7 +630,7 @@ def fetch_one_page(ops, args, pool, query: Query, page_num: int,
                     ops.landed = False
             if state == "throttled" and throttles < THROTTLE_RETRIES:
                 throttles += 1
-                attempt -= 1  # a throttle wait spends its own budget (§24)
+                attempt -= 1  # a throttle wait spends its own budget
                 pause = THROTTLE_WAIT_S * throttles
                 log.warning("Rate-limited on page %d (HTTP 429/418) — waiting "
                             "%.0fs at the same exit (%d/%d).", page_num, pause,
@@ -683,6 +732,8 @@ def check_pay_types(ops, args, query: Query) -> Optional[str]:
     if not query.pay_types:
         return None
     if not ops.landed:
+        # No solve here: this is a courtesy check, not a page. If the landing
+        # is a CAPTCHA, page 1 lands again and pays from its own allowance.
         land(ops, args)
     offered = None
     if ops.landed:
@@ -717,7 +768,7 @@ def run_pages(open_ops, close_ops, run_concurrently, args, pool,
             return 2
 
         # Page 1 is always fetched alone: its total decides how many pages
-        # there are to address (§7).
+        # there are to address.
         first = fetch_one_page(ops, args, pool, query, 1, mask)
         outcomes.append(first)
         if not first.ok:
@@ -824,7 +875,7 @@ def worker_pool(pool, worker_index: int):
     """A private ProxyPool for one worker, starting at a different exit.
 
     Workers start on distinct exits and share no mutable state, so rotation
-    needs no lock (§7).
+    needs no lock.
     """
     if not pool:
         return None
@@ -837,18 +888,18 @@ def worker_pool(pool, worker_index: int):
 def cdp_connect_hint(error_text: str) -> str:
     """What a failed --cdp-endpoint connection means, from its status.
 
-    Two answers that want opposite fixes. Measured 2026-09-24 against four
-    Scraping Browser endpoints left in sibling repos' .env files: all four
-    answered 401 Unauthorized, because a profile's credentials last about a
-    day. The message used to explain a 500 (a pid another run still holds)
+    Two answers that want opposite fixes. A 401 is the service refusing the
+    credentials in the endpoint: expired, mistyped or revoked. How long a
+    profile's credentials live is not a constant (one endpoint was measured
+    still working after ten days), so the message does not guess which.
+    The message used to explain a 500 (a pid another run still holds)
     whatever the status was, which sent the reader to wait for a run that
     did not exist.
     """
     if "401" in (error_text or ""):
-        return ("HTTP 401: the endpoint's credentials were refused. A Scraping "
-                "Browser profile's credentials last about a day, so an "
-                "endpoint copied from an older .env has usually expired. "
-                "Get a fresh one from your 2Captcha dashboard.")
+        return ("HTTP 401: the endpoint's credentials were refused, for "
+                "example an expired, revoked or mistyped profile login. "
+                "Copy the endpoint again from your 2Captcha dashboard.")
     return ("A Scraping Browser profile allows ONE live connection at a time, "
             "so an HTTP 500 here usually means another run still holds this "
             "`pid`. Wait for it to finish, or use a different pid.")

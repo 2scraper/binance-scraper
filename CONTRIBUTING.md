@@ -92,8 +92,8 @@ Then the rest of the presentation, in the order that matters:
    three modes from a GitHub-hosted runner with no proxy. If a later run
    is refused for the runner's address, the canary's `BINANCE_PROXY`
    secret (an exit elsewhere) is the fix, with no workflow edit.
-2. The repo description, homepage and topics set (see the family notes on
-   what those should say).
+2. The repo description, homepage and topics set: the engines, the
+   2Captcha Scraping Browser API by that name, and what the site publishes.
 3. Only then the row in the org profile README — and check it with an
    ANONYMOUS request rather than your own logged-in browser. A row pointing
    at a private repo is a 404 for every visitor, which costs more trust than
@@ -164,10 +164,9 @@ Two things about running this live that are specific to Binance:
 * **No mode needs an exit, a key or an account.** The endpoints answered a
   datacentre VPS normally, so "it worked from my laptop" is reproducible
   here in a way it is not on most sibling repos.
-* **Binance's terms exclude some jurisdictions, the United States among
-  them** (binance.us is a separate exchange). What an address there is
-  answered with has not been measured by this repo. If a run from one is
-  refused, that is the terms, not a bug.
+* **HTTP 451 has not been observed.** The daily canary is served from a
+  GitHub-hosted runner with no proxy. If a run is refused with 451, record
+  the exit's country in the issue.
 
 **Run more than the primary engine.** "Mirror them exactly" is a design
 rule, not a verification. The fetch loop is shared (`page_flow.run_pages`),

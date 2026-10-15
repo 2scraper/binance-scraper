@@ -121,7 +121,7 @@ def check_fixture_corpus_is_real_and_scrubbed():
 
 
 # ---------------------------------------------------------------------------
-# The parser, asserted on VALUES rather than on coverage (§10)
+# The parser, asserted on VALUES rather than on coverage
 # ---------------------------------------------------------------------------
 
 def _q(mode, **kw):
@@ -254,7 +254,7 @@ def check_page_sizes_are_the_measured_ones():
 
 
 def check_position_counts_emitted_rows_not_payload_slots():
-    """§24: a record the parser drops must not shift every later position."""
+    """A record the parser drops must not shift every later position."""
     import product_parser as P
     payload = copy.deepcopy(FIXTURES["p2p_usdt_eur_buy"])
     payload["data"].insert(1, {"adv": None, "advertiser": {}})
@@ -371,6 +371,42 @@ def check_url_and_flags_together_are_refused():
     equal("flag defaults apply without --url", (q.time_range, q.sort_by, q.order),
           ("30D", "roi", "desc"))
 
+    # BINANCE_URL from .env is a DEFAULT. A --mode or a query flag the user
+    # typed wins over it instead of being refused as a conflict with a URL
+    # they never typed. A copied example used to break every README example
+    # that builds its query from flags.
+    def built(**kw):
+        for k, v in kw.items():
+            setattr(args, k, v)
+        errors.clear()
+        try:
+            q = page_flow.build_query(args, err)
+        except SystemExit:
+            return ("refused", errors[0] if errors else "")
+        return (q.mode, q.fiat)
+
+    env_url = "https://p2p.binance.com/en/trade/all-payments/USDT?fiat=EUR"
+    got = built(url=env_url, typed_url=None, mode="announcements")
+    equal("an ENVIRONMENT url gives way to a typed --mode", got[0], "announcements")
+    equal("...and to a typed query flag",
+          built(url=env_url, typed_url=None, mode=None, fiat="TRY"), ("p2p", "TRY"))
+    equal("...and is used when nothing was typed",
+          built(url=env_url, typed_url=None, mode=None, fiat=None), ("p2p", "EUR"))
+    args.url = args.typed_url = env_url
+    args.fiat = "TRY"
+    errors.clear()
+    try:
+        page_flow.build_query(args, err)
+    except SystemExit:
+        pass
+    check("a TYPED --url with --fiat is still refused",
+          errors and "--fiat" in errors[0], repr(errors))
+    for engine in list(ENGINES) + ["http_scraper"]:
+        src = open(os.path.join(HERE, engine + ".py"), encoding="utf-8").read()
+        i, j = src.find("args.typed_url = args.url"), src.find("env_config.apply(args)")
+        check("%s records the typed --url BEFORE .env fills it" % engine,
+              0 <= i < j, "typed_url at %d, apply at %d" % (i, j))
+
 
 # ---------------------------------------------------------------------------
 # Page state: what the site answered with
@@ -412,7 +448,7 @@ def check_the_waf_page_is_solvable_and_detected_fully():
 
 
 def check_markers_do_not_match_a_page_the_scraping_browser_served():
-    """§24: the Scraping Browser's auto-solve extension injects captcha
+    """The Scraping Browser's auto-solve extension injects captcha
     hunters into EVERY page, amazon_waf among them. The marker set must score
     zero against that injection WITHOUT any strip, or the strip is
     load-bearing and the next marker inherits the hole."""
@@ -443,7 +479,7 @@ def check_state_policy():
     check("challenge: retried, solved, blocked",
           F.should_retry("challenge") and F.should_solve("challenge")
           and F.counts_as_blocked("challenge"))
-    check("throttled: retried, NOT blocked (§24)",
+    check("throttled: retried, NOT blocked",
           F.should_retry("throttled") and not F.counts_as_blocked("throttled"))
     check("restricted and blocked: never solved, there is no widget",
           not F.should_solve("restricted") and not F.should_solve("blocked"))
@@ -455,9 +491,23 @@ def check_state_policy():
           "COUNTRY" in F.refusal_advice("restricted"))
     check("...and claims nothing about what binance.com has been SEEN doing",
           "answers" not in F.refusal_advice("restricted"))
-    check("a CDP 401 is explained as expired credentials, not a held pid",
-          "expired" in F.cdp_connect_hint("WebSocket error: 401 Unauthorized")
-          and "pid" not in F.cdp_connect_hint("401 Unauthorized"))
+    # Nobody has seen binance.com answer 451, and the daily canary is served
+    # from a GitHub-hosted runner with no proxy. Advice that names a country
+    # to avoid would send a reader to buy an exit over a guess.
+    check("451's advice says it has not been observed, and names no country to avoid",
+          "not been observed" in F.refusal_advice("restricted")
+          and "United States" not in F.refusal_advice("restricted"))
+    for doc in ("README.md", "TROUBLESHOOTING.md", "CONTRIBUTING.md", ".env.example",
+                os.path.join(".github", "ISSUE_TEMPLATE", "bug_report.yml")):
+        path = os.path.join(HERE, doc)
+        if os.path.exists(path):
+            check("%s does not repeat the unmeasured US refusal" % doc,
+                  "United States" not in open(path, encoding="utf-8").read())
+    hint = F.cdp_connect_hint("WebSocket error: 401 Unauthorized")
+    check("a CDP 401 is explained as refused credentials, not a held pid",
+          "refused" in hint and "pid" not in F.cdp_connect_hint("401 Unauthorized"))
+    check("...without claiming credentials last a fixed time",
+          "about a day" not in hint)
     check("...and a 500 as a held pid", "pid" in F.cdp_connect_hint("HTTP 500"))
     waf = fx("waf_captcha_chromium")
     check("the captured CAPTCHA page names its cookie domains (not vacuous)",
@@ -473,7 +523,7 @@ def check_state_policy():
 
 
 def check_policy_constants_have_a_consumer():
-    """§17: a policy constant nothing reads is the same defect as dead code."""
+    """A policy constant nothing reads is the same defect as dead code."""
     src = open(os.path.join(HERE, "page_flow.py"), encoding="utf-8").read()
     for constant in ("RETRY_ON_BLOCKED", "BLOCK_RETRIES_WITHOUT_POOL",
                      "SOLVES_PER_PAGE", "THROTTLE_RETRIES", "THROTTLE_WAIT_S",
@@ -598,7 +648,7 @@ def check_the_shared_loop_end_to_end():
     equal("...fetched twice", ops.fetches, [1, 1])
     rc, meta, rows, ops = _run({1: [(429, "", None), (200, _p2p_page(1), None)]},
                                pages=1, retries=1)
-    equal("a throttle wait spends its OWN budget, not --retries (§24): "
+    equal("a throttle wait spends its OWN budget, not --retries: "
           "with --retries 1 the page still arrives", rc, 0)
 
     rc, meta, rows, ops = _run({1: [(202, "", "challenge"), (200, _p2p_page(1), None)]}, pages=1)
@@ -608,6 +658,59 @@ def check_the_shared_loop_end_to_end():
     rc, meta, rows, ops = _run({}, query=P.Query("p2p", fiat="EUR", pay_types=("SEPA Instant",)))
     equal("an unknown --pay-type: exit 2 before any search", rc, 2)
     equal("...no search page was fetched", [p for p in ops.fetches if p != 0], [])
+
+
+class _PaidCaptchaOps(_FakeOps):
+    """A landing that is a real AWS WAF CAPTCHA and stays one after a
+    "successful" solve, with a solver that reports success every time. The
+    count of purchases is the only thing being measured."""
+
+    def __init__(self, pool=None):
+        _FakeOps.__init__(self, {}, landing=fx("waf_captcha_chromium"))
+        self.pool = pool
+
+    def goto(self, url):
+        self.gotos += 1
+        return 405, "captcha"
+
+    def solve_captcha(self):
+        self.solves += 1
+        return True
+
+
+def check_the_solve_allowance_is_per_page_not_per_landing():
+    """A refused page lands again after every block-retry and every rotation.
+    The allowance must survive those: one page, at most SOLVES_PER_PAGE
+    purchases, however many times the loop lands. With the allowance kept
+    inside each landing this bought 2 solves with no pool and 4 with a
+    3-exit pool."""
+    import page_flow
+    from product_parser import Query
+    import proxy_pool
+    check("the CAPTCHA landing really classifies as a challenge (not vacuous)",
+          page_flow.classify(fx("waf_captcha_chromium"), 405,
+                             page_flow.ORIGIN_URL, "captcha") == "challenge")
+    for label, pool, block_retries in (
+            ("no pool", None, 3),
+            ("3-exit pool", proxy_pool.ProxyPool(
+                ["http://10.0.0.1:1", "http://10.0.0.2:2", "http://10.0.0.3:3"]), 3)):
+        args = types.SimpleNamespace(
+            pages=1, retries=3, retry_delay=0, delay=0,
+            proxy_block_retries=block_retries, out="unused", format="json",
+            allow_empty=False, dump_html=None, url=None, cdp_endpoint=None,
+            concurrency=1)
+        ops = _PaidCaptchaOps(pool)
+        with tempfile.TemporaryDirectory() as tmp:
+            args.out = os.path.join(tmp, "out")
+            outcome = page_flow.fetch_one_page(ops, args, pool,
+                                               Query("p2p", fiat="EUR"), 1)
+        check("solve allowance, %s: the page was refused and the loop landed "
+              "more than once (not vacuous)" % label,
+              outcome.blocked_by == "aws-waf" and ops.gotos > 1,
+              "blocked_by=%r gotos=%d" % (outcome.blocked_by, ops.gotos))
+        equal("solve allowance, %s: one page buys at most SOLVES_PER_PAGE "
+              "solves across every landing" % label,
+              ops.solves, page_flow.SOLVES_PER_PAGE)
 
 
 def _copy_shrunk_to(total):
@@ -856,7 +959,7 @@ def check_row_schema():
                                ROW_CLASS_BY_MODE, UNIQUE_BY_SKU_MODES)
     for cls in (P2PAd, LeadTrader, Announcement):
         names = [f.name for f in fields(cls)]
-        equal("%s: the family prefix is byte-identical and in order (§9)" % cls.__name__,
+        equal("%s: the family prefix is byte-identical and in order" % cls.__name__,
               names[:5], ["source", "scraped_at", "url", "sku", "title"])
         check("%s: the run-describing tail is present" % cls.__name__,
               {"page", "position", "mode", "data_source"} <= set(names))
@@ -895,12 +998,122 @@ def check_csv_and_json_writers():
         check("an id past 2**53 stays a string in JSON", isinstance(loaded[0]["sku"], str))
 
 
+def check_writes_are_atomic_and_keep_the_umask_mode():
+    """A failure part-way through a write must leave the previous file intact
+    and no temp file behind. Before the atomic writer, a failure inside
+    json.dump turned a good 786-byte out.json into 13 bytes of invalid JSON.
+    And the temp file's 0600 must not become the output's mode."""
+    import output_writer as O
+    import product_parser as P
+    rows = P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR"), 1)
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        O.finish_run(rows, prefix, "both", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u", mode="p2p")
+        before = {ext: open(prefix + ext, encoding="utf-8").read()
+                  for ext in (".json", ".csv", ".meta.json")}
+
+        class Boom(Exception):
+            pass
+
+        def exploding_dump(obj, f, **kw):
+            f.write("[{\"partial\": ")
+            raise Boom()
+        real_dump = O.json.dump
+        O.json.dump = exploding_dump
+        try:
+            for name, call in (
+                    ("write_json", lambda: O.write_json(rows, prefix + ".json")),
+                    ("write_run_meta", lambda: O.write_run_meta(prefix, {"status": "x"}))):
+                try:
+                    call()
+                except Boom:
+                    pass
+        finally:
+            O.json.dump = real_dump
+        real_writerow = csv.DictWriter.writerow
+
+        def exploding_writerow(self, row):
+            raise Boom()
+        csv.DictWriter.writerow = exploding_writerow
+        try:
+            try:
+                O.write_csv(rows, prefix + ".csv", row_cls=O.P2PAd)
+            except Boom:
+                pass
+        finally:
+            csv.DictWriter.writerow = real_writerow
+        for ext, good in before.items():
+            equal("a write that fails part-way leaves the previous %s intact" % ext,
+                  open(prefix + ext, encoding="utf-8").read(), good)
+        equal("...and leaves no temporary file behind",
+              sorted(os.listdir(tmp)), ["out.csv", "out.json", "out.meta.json"])
+
+        old_umask = os.umask(0o022)
+        try:
+            for umask, want in ((0o022, 0o644), (0o002, 0o664), (0o077, 0o600)):
+                os.umask(umask)
+                path = os.path.join(tmp, "new_%o.json" % umask)
+                O.write_json(rows, path)
+                equal("a NEW output under umask %03o is %o, as open() would make it"
+                      % (umask, want), os.stat(path).st_mode & 0o777, want)
+            os.umask(0o022)
+            os.chmod(prefix + ".json", 0o640)
+            O.write_json(rows, prefix + ".json")
+            equal("an EXISTING output keeps its own mode",
+                  os.stat(prefix + ".json").st_mode & 0o777, 0o640)
+        finally:
+            os.umask(old_umask)
+
+
+def check_csv_cells_are_formula_escaped():
+    """Advertiser nicknames, portfolio names and announcement titles are
+    third-party text. A cell starting with = + - @ or a control character is
+    run by a spreadsheet; CSV gets an apostrophe, JSON keeps the bytes."""
+    import output_writer as O
+    import product_parser as P
+    rows = P.parse_page(fx("p2p_usdt_eur_buy"), _q("p2p", fiat="EUR"), 1)[:2]
+    rows[0].title = '=HYPERLINK("x")'
+    rows[0].pay_methods = ["-cmd", "ok"]
+    rows[1].title = "@SUM(1)"
+    rows[1].price = -5.0
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        O.finish_run(rows, prefix, "both", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u", mode="p2p",
+                     extra={"total_results": 2})
+        reader = list(csv.DictReader(open(prefix + ".csv", encoding="utf-8")))
+        equal("a formula-shaped title is escaped in CSV", reader[0]["title"],
+              '\'=HYPERLINK("x")')
+        equal("...and a joined list cell too (escaped AFTER serialising)",
+              reader[0]["pay_methods"], "'-cmd | ok")
+        equal("...and @", reader[1]["title"], "'@SUM(1)")
+        equal("a negative NUMBER is left numeric", reader[1]["price"], "-5.0")
+        loaded = json.load(open(prefix + ".json", encoding="utf-8"))
+        equal("JSON keeps the site's bytes", (loaded[0]["title"], loaded[0]["pay_methods"]),
+              ('=HYPERLINK("x")', ["-cmd", "ok"]))
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        equal("the sidecar declares csv_cells_escaped", meta.get("csv_cells_escaped"), 3)
+        equal("...beside the caller's own extra", meta.get("total_results"), 2)
+    with tempfile.TemporaryDirectory() as tmp:
+        prefix = os.path.join(tmp, "out")
+        O.finish_run(rows, prefix, "both", False, blocked=False,
+                     stop_reason="completed", pages_requested=1,
+                     pages_completed=1, start_url="u", final_url="u", mode="p2p",
+                     extra={"csv_cells_escaped": "caller"})
+        meta = json.load(open(prefix + ".meta.json", encoding="utf-8"))
+        equal("housekeeping merges UNDER the caller's extra, never over it",
+              meta.get("csv_cells_escaped"), "caller")
+
+
 def check_exit_codes():
     import output_writer as O
     equal("3 blocked / 4 empty / 5 never obtained / 6 partial",
           (O.EXIT_BLOCKED, O.EXIT_NO_PRODUCTS, O.EXIT_FETCH_FAILED, O.EXIT_PARTIAL),
           (3, 4, 5, 6))
-    check("end_of_listing is a COMPLETE stop reason (§24)",
+    check("end_of_listing is a COMPLETE stop reason",
           "end_of_listing" in O.COMPLETE_STOP_REASONS)
     check("api_rejected is NOT complete", "api_rejected" not in O.COMPLETE_STOP_REASONS)
 
@@ -965,7 +1178,7 @@ def check_sidecar_shape():
 
 
 # ---------------------------------------------------------------------------
-# The engines — the checks CLAUDE.md §17 says to steal
+# The engines — checks that catch what import and --help cannot
 # ---------------------------------------------------------------------------
 
 def check_engines_import_their_driver_at_module_level():
@@ -982,9 +1195,9 @@ def check_engines_import_their_driver_at_module_level():
 
 
 def check_shared_calls_bind_against_the_real_signature():
-    """§17's check #1. Every call from an engine (and the Scraper API client,
+    """Every call from an engine (and the Scraper API client,
     diff_runs and page_flow itself) into a shared module is bound against the
-    callee's real signature. A name that does not exist FAILS (§22). A name
+    callee's real signature. A name that does not exist FAILS. A name
     bound in the calling file shadows a same-named module."""
     import captcha_solver
     import output_writer
@@ -1059,8 +1272,7 @@ def _argparse_flags(module_name):
     return flags
 
 
-# The family's flag contract (CLAUDE.md §9, including the five it omitted
-# for months), plus this repo's own query flags.
+# The family's flag contract, plus this repo's own query flags.
 CONTRACT_FLAGS = {
     "--url", "--pages", "--category", "--format", "--out", "--delay",
     "--retries", "--retry-delay", "--concurrency", "--proxy", "--proxy-file",
@@ -1074,7 +1286,7 @@ BINANCE_FLAGS = {"--asset", "--fiat", "--side", "--pay-type", "--amount",
 
 
 def check_engine_flag_sets():
-    """§17's check #2: against the contract AND against each other, both
+    """Against the contract AND against each other, both
     ways. The exception list IS the documentation."""
     sets = {m: _argparse_flags(m) for m in ENGINES}
     for module, flags in sets.items():
@@ -1094,7 +1306,7 @@ def check_engine_flag_sets():
 
 
 # The flags that describe a browser, and so are absent from the HTTP engine.
-# The list IS the documentation (§17): the check fails if the HTTP engine
+# The list IS the documentation: the check fails if the HTTP engine
 # gains one, loses a shared one, or if one of these leaves the browser
 # engines while still listed here.
 BROWSER_ONLY_FLAGS = {"--headless", "--headful", "--cdp-endpoint", "--locale",
@@ -1127,7 +1339,7 @@ def check_banned_and_removed_flags():
 
 
 def check_undefined_names_in_every_module():
-    """§10: compileall proves a file PARSES, not that its names RESOLVE.
+    """compileall proves a file PARSES, not that its names RESOLVE.
     Kept COARSE (pooled bindings) so it under-reports rather than invents."""
     import builtins
     for filename in sorted(f for f in os.listdir(HERE) if f.endswith(".py")):
@@ -1207,7 +1419,9 @@ def check_dockerfile_copies_everything_the_entrypoint_imports():
 def check_env_example_documents_exactly_what_the_loader_reads():
     import env_config
     text = open(os.path.join(HERE, ".env.example"), encoding="utf-8").read()
-    documented = set(re.findall(r"^([A-Z][A-Z0-9_]+)=", text, re.M))
+    # A commented-out example (`# BINANCE_URL=...`) documents the variable
+    # without setting it.
+    documented = set(re.findall(r"^(?:# )?([A-Z][A-Z0-9_]+)=", text, re.M))
     read = set(env_config.ENV_KEYS)
     equal("the example and the loader name the same variables",
           sorted(documented), sorted(read))
@@ -1241,7 +1455,7 @@ def check_credential_scan_is_one_implementation_invoked_from_both():
     script = os.path.join(HERE, ".github", "ci_checks.py")
     if not os.path.isdir(os.path.join(HERE, ".github")):
         # Inside the Docker image, which copies no .github at all. Triggered
-        # by the WHOLE directory being absent, never by one file in it (§22).
+        # by the WHOLE directory being absent, never by one file in it.
         skip("ci_checks", "no .github directory (the image)")
         return
     check("the credential scan exists as a script", os.path.exists(script))
@@ -1290,7 +1504,7 @@ def check_the_hex_exemption_is_one_context_only():
 
 
 # Assembled from pieces, so this file can be scanned like every other rather
-# than exempted (§22: the file most likely to acquire a stray phrase is the
+# than exempted (the file most likely to acquire a stray phrase is the
 # one a wholesale exemption never reads).
 BANNED_WORDING = (
     "cloud" + " browser", "anti" + "detect browser", "2scraper " + "Anti" + "detect Browser",
@@ -1299,7 +1513,7 @@ BANNED_WORDING = (
 
 
 def check_banned_wording():
-    """§12, enforced by this test rather than by review."""
+    """Banned product wording, enforced by this test rather than by review."""
     scanned = 0
     for root, dirs, files in os.walk(HERE):
         dirs[:] = [d for d in dirs if d not in (".git", "__pycache__", ".pytest_cache",
@@ -1318,8 +1532,45 @@ def check_banned_wording():
     check("the banned-wording scan read the repo (%d files)" % scanned, scanned > 20)
 
 
+# References to private notes this public repo cannot link to: a reader
+# can open none of them, so a rule is stated in this repo's own words instead.
+# Assembled from pieces so this file is scanned like every other.
+PRIVATE_CITATIONS = (
+    "CLAUDE" + ".md", "claude_" + "2scraper", "2scraper_" + "repo_rules",
+    "play" + "book",
+)
+SECTION_SIGN_REF = re.compile("\u00a7" + r"\s*\d")
+
+
+def check_no_private_citations_in_shipped_files():
+    scanned = 0
+    for root, dirs, files in os.walk(HERE):
+        dirs[:] = [d for d in dirs
+                   if d not in (".git", "__pycache__", ".pytest_cache", "live",
+                                "captures", ".claude")
+                   and not os.path.exists(os.path.join(root, d, "pyvenv.cfg"))]
+        for filename in files:
+            if not filename.endswith((".py", ".md", ".yml", ".yaml", ".txt",
+                                      ".toml", ".cfg", ".example", ".json",
+                                      ".gitignore", ".dockerignore")) \
+                    and filename != "Dockerfile":
+                continue
+            path = os.path.join(root, filename)
+            text = open(path, encoding="utf-8", errors="replace").read()
+            scanned += 1
+            rel = os.path.relpath(path, HERE)
+            for token in PRIVATE_CITATIONS:
+                if token.lower() in text.lower():
+                    check("%s cites no private note (%r)" % (rel, token), False)
+            m = SECTION_SIGN_REF.search(text)
+            if m:
+                line = text.count("\n", 0, m.start()) + 1
+                check("%s:%d carries no bare section-number reference" % (rel, line), False)
+    check("the private-citation scan read the repo (%d files)" % scanned, scanned > 20)
+
+
 def check_concurrency_with_the_browser_stubbed():
-    """§10: a live run cannot always reach this machinery. Driven through the
+    """A live run cannot always reach this machinery. Driven through the
     SHARED worker loop with the fetch replaced."""
     import page_flow
     import queue as queue_mod
@@ -1426,7 +1677,7 @@ def check_fingerprint_kwargs_are_ones_the_driver_accepts():
 
 
 def check_engines_do_not_evaluate_a_string_in_the_browser():
-    """§18: wait_for_function evaluates a string, which a CSP without
+    """`wait_for_function` evaluates a string, which a CSP without
     unsafe-eval kills. page.evaluate with a real function is fine."""
     for module in ENGINES:
         tree = ast.parse(open(os.path.join(HERE, module + ".py"), encoding="utf-8").read())
@@ -1570,7 +1821,7 @@ def check_x_debug_header_is_redacted():
 
 
 def check_captcha_capability_claims_match_the_code():
-    """§19: the most expensive bug this family can ship is a SENTENCE."""
+    """The most expensive bug this family can ship is a SENTENCE."""
     readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
     solver = open(os.path.join(HERE, "captcha_solver.py"), encoding="utf-8").read()
     low = readme.lower()
@@ -1583,7 +1834,7 @@ def check_captcha_capability_claims_match_the_code():
 
 
 def check_readme_numbers_are_not_stale():
-    """§17's check #4: a column count claimed in the README is a class's."""
+    """A column count claimed in the README is a class's."""
     readme = open(os.path.join(HERE, "README.md"), encoding="utf-8").read()
     from output_writer import ROW_CLASS_BY_MODE
     sizes = {len(fields(c)) for c in ROW_CLASS_BY_MODE.values()}

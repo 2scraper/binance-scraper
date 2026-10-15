@@ -3,7 +3,7 @@
 #
 # No secrets are needed, and that is the point of running it: the README's
 # central claim is "no key, no proxy, no account", and an ungated scheduled
-# canary is that sentence under test every morning (CLAUDE.md §21, §24). All
+# canary is that sentence under test every morning. All
 # three data endpoints answered a datacentre address normally when this repo
 # was written (2026-09-24); a GitHub runner is a datacentre address too.
 #
@@ -78,7 +78,7 @@ jobs:
             playwright install --with-deps chromium
           fi
 
-      # >= 3 pages, because with one page pagination is never exercised (§11).
+      # >= 3 pages, because with one page pagination is never exercised.
       - name: Run
         id: run
         run: |
