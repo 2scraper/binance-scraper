@@ -26,6 +26,10 @@ on:
   schedule:
     # 05:40 UTC. Not on the hour: every scheduled workflow fires at :00.
     - cron: "40 5 * * *"
+    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
+    # captcha key). On the daily run above those secrets read as empty, so
+    # it takes the free no-secret route and bills nothing.
+    - cron: "40 5 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -62,7 +66,7 @@ jobs:
             args: "--asset USDT --fiat EUR --side buy"
             floor: 40
     env:
-      BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
+      BINANCE_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '40 5 * * 1') && secrets.BINANCE_PROXY || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
