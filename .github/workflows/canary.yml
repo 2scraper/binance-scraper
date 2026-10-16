@@ -1,9 +1,9 @@
-# One real run of each mode against binance.com, daily. tests.yml
+# One real run of each mode against binance.com, weekly (Mondays). tests.yml
 # (deliberately) never touches the site.
 #
 # No secrets are needed, and that is the point of running it: the README's
 # central claim is "no key, no proxy, no account", and an ungated scheduled
-# canary is that sentence under test every morning. All
+# canary is that sentence under test every Monday. All
 # three data endpoints answered a datacentre address normally when this repo
 # was written (2026-09-24); a GitHub runner is a datacentre address too.
 #
@@ -25,10 +25,6 @@ name: canary
 on:
   schedule:
     # 05:40 UTC. Not on the hour: every scheduled workflow fires at :00.
-    - cron: "40 5 * * *"
-    # Mondays: the same jobs, WITH the paid secrets (proxy, Scraping Browser,
-    # captcha key). On the daily run above those secrets read as empty, so
-    # it takes the free no-secret route and bills nothing.
     - cron: "40 5 * * 1"
   workflow_dispatch:
 
@@ -59,14 +55,14 @@ jobs:
             args: "--mode announcements --category new-listings"
             floor: 100
           # The browserless engine, so the README's "no browser needed" is
-          # under test every morning too. One mode: the loop is shared, and
+          # under test every Monday too. One mode: the loop is shared, and
           # P2P is the POST that needs the most of it.
           - mode: p2p
             engine: http
             args: "--asset USDT --fiat EUR --side buy"
             floor: 40
     env:
-      BINANCE_PROXY: ${{ (github.event_name != 'schedule' || github.event.schedule == '40 5 * * 1') && secrets.BINANCE_PROXY || '' }}
+      BINANCE_PROXY: ${{ secrets.BINANCE_PROXY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

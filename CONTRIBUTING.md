@@ -86,14 +86,13 @@ history needs a decision, not a red check on every push.
 Then the rest of the presentation, in the order that matters:
 
 1. `python3 smoke_test.py` green, and the canary dispatched at least once.
-   It runs daily with no secrets at all and is expected to be green, because
+   It runs weekly (Mondays) with no secrets at all and is expected to be green, because
    no mode needs a credential and a green badge there is exactly the claim
    the README makes. Its first dispatch (2026-09-24) was served in all
    three modes from a GitHub-hosted runner with no proxy. If a later run
    is refused for the runner's address, the canary's `BINANCE_PROXY`
-   secret (an exit elsewhere) is used on the weekly (Monday) run and on a
-   manual dispatch, with no workflow edit; the daily run stays on the
-   runner's own address and bills nothing.
+   secret (an exit elsewhere) is used on every scheduled run and on a
+   manual dispatch, with no workflow edit.
 2. The repo description, homepage and topics set: the engines, the
    2Captcha Scraping Browser API by that name, and what the site publishes.
 3. Only then the row in the org profile README — and check it with an
@@ -166,7 +165,7 @@ Two things about running this live that are specific to Binance:
 * **No mode needs an exit, a key or an account.** The endpoints answered a
   datacentre VPS normally, so "it worked from my laptop" is reproducible
   here in a way it is not on most sibling repos.
-* **HTTP 451 has not been observed.** The daily canary is served from a
+* **HTTP 451 has not been observed.** The weekly canary is served from a
   GitHub-hosted runner with no proxy. If a run is refused with 451, record
   the exit's country in the issue.
 

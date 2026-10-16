@@ -26,7 +26,7 @@ The log names what refused the run:
   uses 403 for a WAF rule, including a rate-limit violation. Slow down
   (`--delay`), or use a different exit.
 * **`geo-451`** — HTTP 451, a refusal for legal reasons. It has not been
-  observed on binance.com in testing (the daily canary is served from a
+  observed on binance.com in testing (the weekly canary is served from a
   GitHub-hosted runner with no proxy), so please open an issue with the
   sidecar's `stop_reason` and the exit's country.
 
