@@ -91,7 +91,9 @@ Then the rest of the presentation, in the order that matters:
    the README makes. Its first dispatch (2026-09-24) was served in all
    three modes from a GitHub-hosted runner with no proxy. If a later run
    is refused for the runner's address, the canary's `BINANCE_PROXY`
-   secret (an exit elsewhere) is the fix, with no workflow edit.
+   secret (an exit elsewhere) is used on the weekly (Monday) run and on a
+   manual dispatch, with no workflow edit; the daily run stays on the
+   runner's own address and bills nothing.
 2. The repo description, homepage and topics set: the engines, the
    2Captcha Scraping Browser API by that name, and what the site publishes.
 3. Only then the row in the org profile README — and check it with an
