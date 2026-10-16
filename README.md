@@ -170,7 +170,7 @@ pages, copy-trading 9,093 → 304, announcements 2,275 → 46, the last page
 partial each time), and the page after it carried none. A page INSIDE that
 range with no rows is the parser missing them. If the total itself is
 renamed, nothing tells the page from an empty listing: that is what the
-canary's row floor is for, and it runs every day.
+canary's row floor is for, and it runs every Monday.
 
 ### 6. A refused parameter is not a block
 
@@ -288,7 +288,7 @@ browser: a full listing, a refused parameter, a 403, an empty listing, a
 throttle, a WAF challenge mid-run and a bad `--pay-type`.
 
 The [canary](.github/workflows/canary.yml) runs a real 3-page scrape of each
-mode daily **with no secrets**, which is what keeps "no account needed"
+mode weekly (Mondays) **with no secrets**, which is what keeps "no account needed"
 honest. Its first dispatch (2026-09-24, a GitHub-hosted runner, no proxy)
 came back complete in all three modes: 60 of 238 adverts, 90 of 8,917
 portfolios, 150 of 2,269 announcements.
