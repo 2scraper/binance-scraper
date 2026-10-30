@@ -1,4 +1,4 @@
-# binance-scraper
+# Binance Scraper — P2P Ads, Copy Trading and Announcements in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/binance-scraper)](https://github.com/2scraper/binance-scraper/releases)
 [![tests](https://github.com/2scraper/binance-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/binance-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-green)](LICENSE)
 ![engines](https://img.shields.io/badge/engines-playwright%20%7C%20selenium%20%7C%20pyppeteer%20%7C%20http-lightgrey)
 ![runs without an account](https://img.shields.io/badge/all%20three%20modes-no%20account%20needed-brightgreen)
+
+**Binance scraper** — an open-source (MIT) Python tool that reads the public lists behind binance.com's P2P order book, futures copy-trading lead portfolios and announcement catalogue and writes adverts, portfolio figures and articles to JSON or CSV. Measured on 2026-09-24 from a datacentre VPS, the JSON endpoints the site's own front end calls answered plain curl with HTTP 200, so none of the three modes needs a key, a proxy or an account. Use it to track P2P prices and limits or copy-trading ROI over time, and compare two runs with `diff_runs.py`.
 
 Scrapes three things from [binance.com](https://www.binance.com) that its
 pages show every visitor, into JSON and CSV:
@@ -307,3 +309,20 @@ jurisdiction are your responsibility as the operator. `--delay` defaults to
 1 second between pages.
 
 MIT licensed. Not affiliated with or endorsed by Binance.
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Google Finance scraper](https://github.com/2scraper/google-finance-scraper) — Quotes, quarterly financials, analyst targets, OHLCV, market…
+- [OpenSea scraper](https://github.com/2scraper/opensea-scraper) — NFT items, collection rankings and activity feeds…
+- [Polymarket scraper](https://github.com/2scraper/polymarket-scraper) — Prediction-market prices, order books, volumes and on-chain…
+- [Screener.in scraper](https://github.com/2scraper/screener-scraper) — Any screener.in stock screen or sector listing
+- [TipRanks scraper](https://github.com/2scraper/tipranks-scraper) — Smart Score, analyst consensus and price targets for any…
+- [Flippa scraper](https://github.com/2scraper/flippa-scraper) — Online businesses for sale on Flippa
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
